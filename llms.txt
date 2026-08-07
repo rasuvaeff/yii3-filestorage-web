@@ -1,0 +1,125 @@
+# rasuvaeff/yii3-filestorage-web
+
+Signed download URLs and a download action for `rasuvaeff/yii3-filestorage`.
+Namespace `Rasuvaeff\Yii3FilestorageWeb\`. PHP 8.3–8.5.
+
+## Install
+
+```bash
+composer require rasuvaeff/yii3-filestorage-web
+```
+
+Binds `SigningKeyRing`, `UrlSignerInterface`, `ProxyUrlGeneratorInterface`,
+`FileResponseFactory`, `ActiveMediaTypes` and `FileDownloadAction`. Does NOT
+bind `StorageInterface`, `RepositoryInterface` or `StoreInterface`.
+
+Needs `ScopedFileResolverInterface`, which `rasuvaeff/yii3-filestorage-db`
+provides.
+
+## Rules
+
+1. **Every failure is a 404** — bad signature, expiry, wrong scope, missing
+   bytes. A 403 confirms the id exists.
+2. **The scope comes from the token, never the request.** Never resolve by id
+   alone.
+3. **Conditional GET is answered before the store is opened.**
+4. **Active content is forced to attachment** whatever the delivery policy
+   says, plus `nosniff`.
+5. **A token carrying a `variant` is refused** until the images package exists —
+   never served the original.
+6. **Ranges follow the store**: `RangeReadableStoreInterface` first, a seekable
+   sized stream second, otherwise no `Accept-Ranges` and a full 200.
+
+## Params
+
+```php
+'rasuvaeff/yii3-filestorage-web' => [
+    'route' => '/files/{token}',        // must contain {token}
+    'tokenAttribute' => 'token',        // request attribute the router fills
+    'cacheControl' => 'private, max-age=3600',
+    'signingKeys' => ['active' => '2026-08', 'keys' => ['2026-08' => '…32+ bytes…']],
+    'extraActiveMediaTypes' => [],      // added to the built-in list
+],
+```
+
+Route the action yourself:
+`Route::get('/files/{token}')->action(FileDownloadAction::class)`.
+
+## API reference
+
+### `Action\FileDownloadAction` (`RequestHandlerInterface`)
+
+```php
+new FileDownloadAction(
+    UrlSignerInterface $signer,
+    ScopedFileResolverInterface $files,
+    StoreRegistry $stores,
+    DeliveryPolicyRegistry $deliveryPolicies,
+    FileResponseFactory $downloads,
+    ResponseFactoryInterface $responses,
+    ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
+    string $cacheControl = 'private, max-age=3600',
+    string $tokenAttribute = 'token',
+);
+```
+
+Order: verify token → refuse a variant → resolve in scope → ETag/`304` →
+open the store → delivery policy → response → `nosniff`.
+
+ETag is the content hash when there is one, else a hash of
+`id|size|updatedAt`. `If-None-Match` (including `W/` and `*`) wins over
+`If-Modified-Since`, per RFC 9110. `Last-Modified` and `Cache-Control` are on
+both the `200` and the `304`.
+
+### `Url\HmacProxyUrlGenerator` (`ProxyUrlGeneratorInterface`)
+
+```php
+new HmacProxyUrlGenerator(
+    UrlSignerInterface $signer,
+    string $route = '/files/{token}',       // InvalidArgumentException without {token}
+    ?FileScopeProviderInterface $scopes = null,
+);
+```
+
+Stamps the *current* scope into the token at minting time.
+
+### `Http\FileResponseFactory`
+
+```php
+$factory->create(
+    File $file,
+    StoreInterface $store,
+    StreamInterface $stream,
+    DeliveryOptions $options,
+    bool $inline,
+    ?string $rangeHeader = null,
+): ResponseInterface;
+```
+
+Sets `Content-Type` and `Content-Disposition` (via `yiisoft/http`, RFC 6266).
+Adds `Accept-Ranges` only when the store or the stream can honour a range; then
+`206`/`Content-Range` for a satisfiable one, `416` + `bytes */size` for an
+unsatisfiable one, and a full `200` for anything it does not serve.
+
+### `Http\ByteRange`
+
+```php
+ByteRange::parse(string $header, int $size): ByteRange|false|null;
+// ByteRange → serve it; false → serve everything; null → 416
+```
+
+`bytes=a-b`, `bytes=a-`, `bytes=-n`. Single ranges only.
+`$range->first`, `$range->last` (inclusive), `length()`, `contentRange($size)`.
+
+### `ActiveMediaTypes`
+
+```php
+new ActiveMediaTypes();                                 // the built-in list
+ActiveMediaTypes::withExtra(['application/x-thing']);   // added to it
+$types->contains('text/html; charset=utf-8');           // true — parameters ignored
+```
+
+Built-in: `text/html`, `application/xhtml+xml`, `image/svg+xml`,
+`application/xml`, `text/xml`, `application/xslt+xml`, `text/xsl`,
+`application/mathml+xml`, `application/pdf`,
+`application/x-shockwave-flash`.

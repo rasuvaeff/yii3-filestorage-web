@@ -1,0 +1,21 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "logs": {
+        "text": "php://stderr",
+        "summary": "build/infection-summary.log"
+    },
+    "testFramework": "testo",
+    // 86, and no mutator is ignored — what the suite honestly achieves. The
+    // survivors are documented in AGENTS.md: concat permutations that stay
+    // injective, clamps guarding values their sources cannot produce, and
+    // trims that a callee already performs. If a change makes a group
+    // disappear, raise this; if one adds an escapee outside them, the gate
+    // fails at 86.
+    "minMsi": 86,
+    "mutators": {
+        "@default": true
+    }
+}

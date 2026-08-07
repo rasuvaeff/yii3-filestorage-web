@@ -1,0 +1,126 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Rasuvaeff\Yii3FilestorageWeb\Http;
+
+use Psr\Http\Message\ResponseFactoryInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamFactoryInterface;
+use Psr\Http\Message\StreamInterface;
+use Rasuvaeff\Yii3Filestorage\File;
+use Rasuvaeff\Yii3Filestorage\Policy\DeliveryOptions;
+use Rasuvaeff\Yii3Filestorage\Store\RangeReadableStoreInterface;
+use Rasuvaeff\Yii3Filestorage\Store\StoreInterface;
+use Rasuvaeff\Yii3Filestorage\Stream\LimitedStream;
+use Yiisoft\Http\ContentDispositionHeader;
+use Yiisoft\Http\Header;
+use Yiisoft\Http\Status;
+
+/**
+ * Turns a stored file into a download response, with ranges where they work.
+ *
+ * The interesting decision is when to advertise `Accept-Ranges`, and it is a
+ * question about the *store*, not about the body in hand. Three cases:
+ *
+ * - The store implements {@see RangeReadableStoreInterface}: it has a real
+ *   range primitive, so a range costs one ranged read.
+ * - It does not, but the body is seekable and knows its length — a local file:
+ *   windowing it with {@see LimitedStream} is a seek, which is just as cheap.
+ * - Neither, which is every object store: `readStream()` gives a forward-only
+ *   body and honouring a range would mean downloading and discarding the
+ *   prefix. So no `Accept-Ranges`, and a full `200`. That is the honest answer,
+ *   and for S3 the right fix is a presigned URL, which S3 ranges natively.
+ *
+ * The first case is why this is written rather than delegated: a response
+ * builder handed only a stream can serve the second case and never the first.
+ *
+ * @api
+ */
+final readonly class FileResponseFactory
+{
+    public function __construct(
+        private ResponseFactoryInterface $responses,
+        private StreamFactoryInterface $streams,
+    ) {}
+
+    /**
+     * @param string|null $rangeHeader The request's `Range`, when it had one
+     *        and any `If-Range` precondition passed.
+     */
+    public function create(
+        File $file,
+        StoreInterface $store,
+        StreamInterface $stream,
+        DeliveryOptions $options,
+        bool $inline,
+        ?string $rangeHeader = null,
+    ): ResponseInterface {
+        $rangeable = $store instanceof RangeReadableStoreInterface
+            || ($stream->isSeekable() && $stream->getSize() !== null);
+
+        $response = $this->responses->createResponse()
+            ->withHeader(Header::CONTENT_TYPE, $options->responseMediaType)
+            ->withHeader(
+                ContentDispositionHeader::name(),
+                ContentDispositionHeader::value(
+                    $inline ? ContentDispositionHeader::INLINE : ContentDispositionHeader::ATTACHMENT,
+                    $options->downloadName,
+                ),
+            );
+
+        if (!$rangeable) {
+            return $response->withBody($stream);
+        }
+
+        // The persisted size is the one the client is told about, so a range is
+        // computed against the same number `Content-Length` reports.
+        $size = max(0, $stream->getSize() ?? $file->size);
+        $response = $response->withHeader(Header::ACCEPT_RANGES, 'bytes');
+
+        $range = $rangeHeader === null || $rangeHeader === ''
+            ? false
+            : ByteRange::parse($rangeHeader, $size);
+
+        if ($range === null) {
+            return $response
+                ->withStatus(Status::RANGE_UNSATISFIABLE)
+                ->withHeader(Header::CONTENT_RANGE, "bytes */{$size}")
+                ->withHeader(Header::CONTENT_LENGTH, '0')
+                ->withBody($this->streams->createStream());
+        }
+
+        if ($range === false) {
+            return $response
+                ->withHeader(Header::CONTENT_LENGTH, (string) $size)
+                ->withBody($stream);
+        }
+
+        return $response
+            ->withStatus(Status::PARTIAL_CONTENT)
+            ->withHeader(Header::CONTENT_RANGE, $range->contentRange($size))
+            ->withHeader(Header::CONTENT_LENGTH, (string) $range->length())
+            ->withBody($this->window($file, $store, $stream, $range));
+    }
+
+    private function window(
+        File $file,
+        StoreInterface $store,
+        StreamInterface $stream,
+        ByteRange $range,
+    ): StreamInterface {
+        if ($store instanceof RangeReadableStoreInterface) {
+            $ranged = $store->streamRange($file, $range->first, $range->length());
+            if ($ranged instanceof \Psr\Http\Message\StreamInterface) {
+                return $ranged;
+            }
+            // The store advertised the capability and then declined — the
+            // object went away mid-request, most likely. Falling through to the
+            // seekable path is still correct when the body allows it.
+        }
+
+        return $stream->isSeekable()
+            ? new LimitedStream($stream, $range->first, $range->length())
+            : $stream;
+    }
+}
