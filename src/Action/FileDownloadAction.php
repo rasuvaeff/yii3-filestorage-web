@@ -10,12 +10,14 @@ use Override;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Rasuvaeff\Yii3Filestorage\File;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryOptions;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
+use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
 use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
@@ -87,12 +89,12 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         // A variant is a rendition the images package produces. Until it
         // exists, a token asking for one must not quietly get the original —
         // the variant is inside the signature precisely so it cannot.
-        if (!$payload instanceof \Rasuvaeff\Yii3Filestorage\Url\SignedPayload || $payload->variant !== null) {
+        if (!$payload instanceof SignedPayload || $payload->variant !== null) {
             return $this->notFound();
         }
 
         $file = $this->files->findInScope($payload->fileId, $payload->scopeId);
-        if (!$file instanceof \Rasuvaeff\Yii3Filestorage\File) {
+        if (!$file instanceof File) {
             return $this->notFound();
         }
 
@@ -103,7 +105,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
 
         $store = $this->stores->get($file->storeName);
         $stream = $store->stream($file);
-        if (!$stream instanceof \Psr\Http\Message\StreamInterface) {
+        if (!$stream instanceof StreamInterface) {
             // A row pointing at bytes that are gone. Nothing to serve, and
             // nothing the client can do about it either.
             return $this->notFound();

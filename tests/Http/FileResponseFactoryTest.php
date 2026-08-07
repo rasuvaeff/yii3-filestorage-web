@@ -171,6 +171,10 @@ final class FileResponseFactoryTest
             rangeHeader: 'bytes=6-10',
         );
 
+        Assert::same($response->getStatusCode(), 200);
+        Assert::same($response->getHeaderLine('Accept-Ranges'), '');
+        Assert::same($response->getHeaderLine('Content-Range'), '');
+        Assert::same($response->getHeaderLine('Content-Length'), '11');
         Assert::same((string) $response->getBody(), 'hello world');
     }
 

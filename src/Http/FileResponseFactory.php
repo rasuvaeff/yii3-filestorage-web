@@ -76,15 +76,17 @@ final readonly class FileResponseFactory
         // The persisted size is the one the client is told about, so a range is
         // computed against the same number `Content-Length` reports.
         $size = max(0, $stream->getSize() ?? $file->size);
-        $response = $response->withHeader(Header::ACCEPT_RANGES, 'bytes');
 
         $range = $rangeHeader === null || $rangeHeader === ''
             ? false
             : ByteRange::parse($rangeHeader, $size);
 
         if ($range === null) {
+            $stream->close();
+
             return $response
                 ->withStatus(Status::RANGE_UNSATISFIABLE)
+                ->withHeader(Header::ACCEPT_RANGES, 'bytes')
                 ->withHeader(Header::CONTENT_RANGE, "bytes */{$size}")
                 ->withHeader(Header::CONTENT_LENGTH, '0')
                 ->withBody($this->streams->createStream());
@@ -92,35 +94,40 @@ final readonly class FileResponseFactory
 
         if ($range === false) {
             return $response
+                ->withHeader(Header::ACCEPT_RANGES, 'bytes')
                 ->withHeader(Header::CONTENT_LENGTH, (string) $size)
                 ->withBody($stream);
         }
 
-        return $response
-            ->withStatus(Status::PARTIAL_CONTENT)
-            ->withHeader(Header::CONTENT_RANGE, $range->contentRange($size))
-            ->withHeader(Header::CONTENT_LENGTH, (string) $range->length())
-            ->withBody($this->window($file, $store, $stream, $range));
-    }
-
-    private function window(
-        File $file,
-        StoreInterface $store,
-        StreamInterface $stream,
-        ByteRange $range,
-    ): StreamInterface {
         if ($store instanceof RangeReadableStoreInterface) {
             $ranged = $store->streamRange($file, $range->first, $range->length());
-            if ($ranged instanceof \Psr\Http\Message\StreamInterface) {
-                return $ranged;
+            if ($ranged instanceof StreamInterface) {
+                $stream->close();
+
+                return $response
+                    ->withStatus(Status::PARTIAL_CONTENT)
+                    ->withHeader(Header::ACCEPT_RANGES, 'bytes')
+                    ->withHeader(Header::CONTENT_RANGE, $range->contentRange($size))
+                    ->withHeader(Header::CONTENT_LENGTH, (string) $range->length())
+                    ->withBody($ranged);
             }
-            // The store advertised the capability and then declined — the
-            // object went away mid-request, most likely. Falling through to the
-            // seekable path is still correct when the body allows it.
+
+            // The object disappeared between stream() and streamRange(). A
+            // forward-only source cannot safely fulfil the requested window,
+            // so fall back to an ordinary representation instead of labeling
+            // its first bytes as a later range.
+            if (!$stream->isSeekable()) {
+                return $response
+                    ->withHeader(Header::CONTENT_LENGTH, (string) $size)
+                    ->withBody($stream);
+            }
         }
 
-        return $stream->isSeekable()
-            ? new LimitedStream($stream, $range->first, $range->length())
-            : $stream;
+        return $response
+            ->withStatus(Status::PARTIAL_CONTENT)
+            ->withHeader(Header::ACCEPT_RANGES, 'bytes')
+            ->withHeader(Header::CONTENT_RANGE, $range->contentRange($size))
+            ->withHeader(Header::CONTENT_LENGTH, (string) $range->length())
+            ->withBody(new LimitedStream($stream, $range->first, $range->length()));
     }
 }
