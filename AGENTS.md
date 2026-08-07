@@ -108,7 +108,16 @@ groups:
 - Every validation regex ends with `\z`, never `$` (`docs/evolved-rules.md`
   ER-001).
 - `config/di.php` is covered by neither cs, nor psalm, nor `src`-scoped tests.
-  `ConfigWiringTest` exercises it through a real container instead.
+  `ConfigWiringTest` exercises it through a real container instead. What no
+  package-local test can see is the *other* three packages: run
+  `bin/config-merge-harness @filestorage --with=yiisoft/cache:^3.2
+  --with=yiisoft/db-sqlite:^2.0` from the monorepo root after touching
+  `config/`.
+- **This package declares no `params['yiisoft/yii-console']` key, and must not
+  start.** It ships no commands. An empty `commands` array would still make a
+  third vendor package claim that top-level key, and `yiisoft/config` only
+  tolerates two because every Yii3 runner merges `params` recursively — spending
+  that tolerance on a contribution worth nothing is how a family stops merging.
 - `examples/` is part of the public contract: keep scripts runnable and update
   `examples/README.md` when example usage changes.
 - **CI workflows are SHA-pinned.** Every `uses:` references a 40-char commit

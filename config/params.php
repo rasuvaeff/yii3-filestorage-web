@@ -25,9 +25,10 @@ return [
         // Empty means the built-in list; anything here is added to it.
         'extraActiveMediaTypes' => [],
     ],
-    'yiisoft/yii-console' => [
-        'commands' => [],
-    ],
+    // No `yiisoft/yii-console` key here. This package ships no commands, and an
+    // empty `commands` array is not free: it makes a third vendor package claim
+    // that top-level key, so the family's merge then depends on the runner's
+    // recursive `params` merge for a contribution worth nothing.
     // Registered so `FileDownloadAction` can be referenced from a route file
     // without the application having to construct it.
     'rasuvaeff/yii3-filestorage-web/action' => FileDownloadAction::class,

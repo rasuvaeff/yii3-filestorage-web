@@ -19,3 +19,9 @@ Initial development. Not released.
   `416`, `Accept-Ranges`, taking the window from the *store* when it has a
   range primitive and from the stream when it is seekable.
 - `ActiveMediaTypes`: the list a delivery policy is not allowed to override.
+- Dropped the empty `params['yiisoft/yii-console']['commands']` this package
+  declared. It shipped no commands, so the key bought nothing and cost a third
+  vendor package claiming a top-level `params` key that `yiisoft/config` accepts
+  only because a Yii3 runner merges `params` recursively. Found by the
+  four-package merge harness (`bin/config-merge-harness` in the monorepo), which
+  reports the duplicate the moment that recursion is not there.
