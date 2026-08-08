@@ -60,7 +60,7 @@ final readonly class FileResponseFactory
             || ($stream->isSeekable() && $stream->getSize() !== null);
 
         $response = $this->responses->createResponse()
-            ->withHeader(Header::CONTENT_TYPE, $options->responseMediaType)
+            ->withHeader(Header::CONTENT_TYPE, self::headerSafe($options->responseMediaType))
             ->withHeader(
                 ContentDispositionHeader::name(),
                 ContentDispositionHeader::value(
@@ -84,8 +84,14 @@ final readonly class FileResponseFactory
         if ($range === null) {
             $stream->close();
 
+            // Without the file's own type and disposition. A browser handed
+            // `attachment; filename="report.pdf"` with `application/pdf` and
+            // an empty body saves a zero-byte report.pdf that looks like a
+            // download that worked.
             return $response
                 ->withStatus(Status::RANGE_UNSATISFIABLE)
+                ->withoutHeader(Header::CONTENT_TYPE)
+                ->withoutHeader(Header::CONTENT_DISPOSITION)
                 ->withHeader(Header::ACCEPT_RANGES, 'bytes')
                 ->withHeader(Header::CONTENT_RANGE, "bytes */{$size}")
                 ->withHeader(Header::CONTENT_LENGTH, '0')
@@ -129,5 +135,26 @@ final readonly class FileResponseFactory
             ->withHeader(Header::CONTENT_RANGE, $range->contentRange($size))
             ->withHeader(Header::CONTENT_LENGTH, (string) $range->length())
             ->withBody(new LimitedStream($stream, $range->first, $range->length()));
+    }
+
+    /**
+     * Strips what must never reach a header value.
+     *
+     * `DeliveryOptions::fromFile()` already does this for the sibling download
+     * name; the media type arrived unchecked, and `File::create()` validates it
+     * only as non-empty. The shipped upload path cannot produce a bad one —
+     * finfo sniffs server-side — but `File::fromArray()`, a row written by
+     * another system, or a custom detector all can. The realistic outcome is a
+     * 500 from a strict PSR-7 implementation and a split header on a lax one,
+     * and an interior CRLF is also the one string that slips past
+     * `ActiveMediaTypes::contains()` and gets served inline.
+     *
+     * @return non-empty-string
+     */
+    private static function headerSafe(string $mediaType): string
+    {
+        $clean = str_replace(["\r", "\n", "\0"], '', $mediaType);
+
+        return $clean === '' ? 'application/octet-stream' : $clean;
     }
 }

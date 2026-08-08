@@ -12,6 +12,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Rasuvaeff\Yii3Filestorage\Exception\FilestorageException;
 use Rasuvaeff\Yii3Filestorage\File;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryOptions;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
@@ -76,6 +77,25 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
     #[Override]
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        try {
+            return $this->serve($request);
+        } catch (FilestorageException|\InvalidArgumentException) {
+            // Golden rule 3 says everything that fails answers 404, and until
+            // now that held only for collaborators returning null. Three throw
+            // instead: StoreRegistry::get() for a storeName configuration no
+            // longer has — old rows keep the old name — the resolver for a row
+            // its mapper cannot read, and withHeader() for a media type a
+            // strict PSR-7 implementation refuses. Each was a 500 where the
+            // contract promises 404, and a 500 on a download route is also a
+            // fingerprint: it distinguishes "this id exists but something is
+            // wrong with it" from "no such id", which the opaque token exists
+            // to withhold.
+            return $this->notFound();
+        }
+    }
+
+    private function serve(ServerRequestInterface $request): ResponseInterface
+    {
         // Through the attribute array rather than `getAttribute()`: an array
         // offset is something psalm narrows across accesses, where a method
         // call's `mixed` would need a `@var` tag that rector deletes as
@@ -98,7 +118,13 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
             return $this->notFound();
         }
 
-        $etag = $this->etag($file);
+        // The delivery decision is made *before* the validator, because the
+        // validator has to depend on it. Bytes alone are not what a cache
+        // stores: it stores the response, disposition included.
+        $options = DeliveryOptions::fromFile($file, $this->deliveryPolicies->for($file->groupName));
+        $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($options->responseMediaType);
+
+        $etag = $this->etag($file, $options, $inline);
         if ($this->isCurrent($request, $etag, $file->updatedAt)) {
             return $this->validators($this->responses->createResponse(Status::NOT_MODIFIED), $etag, $file);
         }
@@ -111,16 +137,13 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
             return $this->notFound();
         }
 
-        $options = DeliveryOptions::fromFile($file, $this->deliveryPolicies->for($file->groupName));
-        $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($options->responseMediaType);
-
         $response = $this->downloads->create(
             file: $file,
             store: $store,
             stream: $stream,
             options: $options,
             inline: $inline,
-            rangeHeader: $this->rangeHeader($request, $etag),
+            rangeHeader: $this->rangeHeader($request, $etag, $file->updatedAt),
         );
 
         return $this->validators($response, $etag, $file)
@@ -138,13 +161,32 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      * the same three are not provably byte-identical — and a weak validator is
      * still enough for `If-None-Match`, which is what it is used for.
      *
+     * The disposition is part of it, and that is not decoration. A client can
+     * hold a cached 200 carrying `Content-Disposition: inline` for an SVG; the
+     * operator then closes the hole by adding the type to
+     * `extraActiveMediaTypes` or flipping the group to `forceDownload`. The
+     * bytes did not change, so a validator built from bytes alone still
+     * matches, the revalidation returns 304 — and RFC 9111 has the cache update
+     * its stored headers from that 304, which carries no `Content-Disposition`
+     * at all (RFC 9110 forbids `Content-*` there). The stored `inline` would
+     * survive indefinitely: the stored XSS this class exists to prevent, one
+     * day late. Folding the decision into the validator is what breaks that.
+     *
      * @return non-empty-string
      */
-    private function etag(File $file): string
+    private function etag(File $file, DeliveryOptions $options, bool $inline): string
     {
+        $strong = $file->contentHash !== null;
         $source = $file->contentHash ?? ($file->id . '|' . $file->size . '|' . $file->updatedAt->format('U.u'));
+        $source .= '|' . ($inline ? 'inline' : 'attachment') . '|' . $options->responseMediaType;
 
-        return '"' . hash('xxh128', $source) . '"';
+        // Marked weak when it is weak. The fallback triple does not prove two
+        // responses are byte-identical — an in-place rewrite that preserves
+        // updatedAt leaves it unchanged — and RFC 9110 allows a weak validator
+        // for If-None-Match but not for If-Range. Emitting it unmarked claimed
+        // a strength it does not have, and a resuming client would then splice
+        // an old prefix onto a new suffix.
+        return ($strong ? '' : 'W/') . '"' . hash('xxh128', $source) . '"';
     }
 
     private function isCurrent(ServerRequestInterface $request, string $etag, DateTimeImmutable $updatedAt): bool
@@ -157,10 +199,13 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
                 return true;
             }
 
+            // Weak comparison, which is the right one for a conditional GET —
+            // and it has to strip *both* sides now that this class marks its
+            // own fallback validator weak. Stripping only the client's turned
+            // every 304 into a 200 the moment ours grew a `W/`.
+            $ours = self::withoutWeakness($etag);
             foreach (explode(',', $ifNoneMatch) as $candidate) {
-                // W/ prefixes compare weakly, which is the right comparison for
-                // a conditional GET.
-                if (ltrim(trim($candidate), 'W/') === $etag) {
+                if (self::withoutWeakness(trim($candidate)) === $ours) {
                     return true;
                 }
             }
@@ -188,16 +233,53 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      * the file has changed since, continuing from byte 40000 would splice two
      * different files together. A mismatch means send the whole current one.
      */
-    private function rangeHeader(ServerRequestInterface $request, string $etag): ?string
-    {
+    /**
+     * `If-Range` is answered only by a strong validator, and understands both
+     * forms the specification allows.
+     *
+     * A weak ETag — the fallback triple — cannot answer it: two responses
+     * sharing that triple are not provably the same bytes, and splicing a
+     * resumed suffix onto a stale prefix is the corruption the header exists to
+     * prevent. The date form matters in practice: download managers and
+     * curl/wget resume flows send it, and treating it as a non-match turned
+     * every resume into a silent full re-download.
+     */
+    private function rangeHeader(
+        ServerRequestInterface $request,
+        string $etag,
+        DateTimeImmutable $updatedAt,
+    ): ?string {
         $range = trim($request->getHeaderLine(Header::RANGE));
         if ($range === '') {
             return null;
         }
 
         $ifRange = trim($request->getHeaderLine(Header::IF_RANGE));
+        if ($ifRange === '') {
+            return $range;
+        }
 
-        return $ifRange === '' || $ifRange === $etag ? $range : null;
+        if (str_starts_with($ifRange, '"')) {
+            // Strong comparison, and a weak ETag of ours can never match it.
+            return $ifRange === $etag && !str_starts_with($etag, 'W/') ? $range : null;
+        }
+
+        $asDate = DateTimeImmutable::createFromFormat(self::HTTP_DATE, $ifRange, new DateTimeZone('GMT'));
+
+        return $asDate !== false && $asDate->getTimestamp() === $updatedAt->getTimestamp() ? $range : null;
+    }
+
+    /**
+     * Drops a `W/` prefix, and only a prefix.
+     *
+     * `ltrim($value, 'W/')` is a character-class strip: it would eat every
+     * leading `W` and `/` it found. Nothing this class emits starts with either
+     * once the prefix is gone, but a client's header is not this class's to
+     * assume things about.
+     */
+    private static function withoutWeakness(string $etag): string
+    {
+        return str_starts_with($etag, 'W/') ? substr($etag, 2) : $etag;
     }
 
     private function validators(ResponseInterface $response, string $etag, File $file): ResponseInterface
@@ -211,8 +293,16 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
             ->withHeader(Header::CACHE_CONTROL, $this->cacheControl);
     }
 
+    /**
+     * Never cached. A 404 is heuristically cacheable, and two of the paths here
+     * are transient — a store outage, a row a mapper could not read — so an
+     * intermediary could pin "gone" onto a token URL that stays valid for the
+     * rest of its life.
+     */
     private function notFound(): ResponseInterface
     {
-        return $this->responses->createResponse(Status::NOT_FOUND);
+        return $this->responses
+            ->createResponse(Status::NOT_FOUND)
+            ->withHeader(Header::CACHE_CONTROL, 'no-store');
     }
 }

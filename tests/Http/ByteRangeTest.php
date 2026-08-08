@@ -109,4 +109,29 @@ final class ByteRangeTest
 
         return $range;
     }
+
+    /**
+     * An invalid spec is ignored, not refused. RFC 9110 makes a range invalid
+     * when last-byte-pos is below first-byte-pos, and an invalid Range field
+     * must be ignored — the client gets the whole file. Answering 416 turned a
+     * malformed header into a hard error over a file it could have had.
+     */
+    public function aLastPositionBelowTheFirstIsIgnoredRatherThanRefused(): void
+    {
+        Assert::false(ByteRange::parse('bytes=5-3', 100));
+    }
+
+    /**
+     * And the distinction survives the clamp: on a 10-byte file `bytes=5-99`
+     * is satisfiable and `bytes=5-3` is not a range at all, though both end up
+     * comparing against the same last byte once clamped.
+     */
+    public function anOverlongLastPositionIsStillSatisfiable(): void
+    {
+        $range = ByteRange::parse('bytes=5-99', 10);
+
+        Assert::instanceOf($range, ByteRange::class);
+        Assert::same($range->first, 5);
+        Assert::same($range->last, 9);
+    }
 }

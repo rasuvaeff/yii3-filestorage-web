@@ -228,10 +228,11 @@ final class FileDownloadActionTest
 
     public function aWeakEtagStillMatches(): void
     {
-        $etag = $this->action->handle(Fixtures::request($this->tokenFor('file-1')))->getHeaderLine('ETag');
+        $this->files->add(Fixtures::file('hashed', contentHash: str_repeat('a', 64)));
+        $etag = $this->action->handle(Fixtures::request($this->tokenFor('hashed')))->getHeaderLine('ETag');
 
         $response = $this->action->handle(
-            Fixtures::request($this->tokenFor('file-1'), ['If-None-Match' => 'W/' . $etag]),
+            Fixtures::request($this->tokenFor('hashed'), ['If-None-Match' => 'W/' . $etag]),
         );
 
         Assert::same($response->getStatusCode(), 304);
@@ -331,9 +332,22 @@ final class FileDownloadActionTest
      * An ETag is a quoted string in HTTP. An unquoted one is not a valid
      * entity-tag, and a client is entitled to ignore it.
      */
-    public function theEtagIsAQuotedHexString(): void
+    /**
+     * Weak when it is weak. The fallback triple does not prove two responses
+     * are byte-identical — an in-place rewrite preserving updatedAt leaves it
+     * unchanged — so marking it strong claimed a strength it does not have, and
+     * If-Range would then splice a resumed suffix onto a stale prefix.
+     */
+    public function theFallbackEtagIsMarkedWeak(): void
     {
-        Assert::same(preg_match('/^"[0-9a-f]{32}"\z/', $this->etagOf('file-1')), 1);
+        Assert::same(preg_match('/^W\/"[0-9a-f]{32}"\z/', $this->etagOf('file-1')), 1);
+    }
+
+    public function aContentHashGivesAStrongEtag(): void
+    {
+        $this->files->add(Fixtures::file('hashed', contentHash: str_repeat('a', 64)));
+
+        Assert::same(preg_match('/^"[0-9a-f]{32}"\z/', $this->etagOf('hashed')), 1);
     }
 
     /**
@@ -411,15 +425,48 @@ final class FileDownloadActionTest
 
     public function amatchingIfRangeKeepsIt(): void
     {
-        $etag = $this->etagOf('file-1');
+        // A file with a content hash, because only a strong validator may
+        // answer If-Range at all.
+        $this->files->add(Fixtures::file('hashed', contentHash: str_repeat('a', 64)));
+        $etag = $this->etagOf('hashed');
 
-        $response = $this->action->handle(Fixtures::request($this->tokenFor('file-1'), [
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('hashed'), [
             'Range' => 'bytes=0-4',
             'If-Range' => $etag,
         ]));
 
         Assert::same($response->getStatusCode(), 206);
         Assert::same((string) $response->getBody(), 'hello');
+    }
+
+    /**
+     * A weak validator cannot answer If-Range, so the range is dropped and the
+     * whole file is served — which is the safe outcome, not an error.
+     */
+    public function aweakEtagCannotAnswerIfRange(): void
+    {
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('file-1'), [
+            'Range' => 'bytes=0-4',
+            'If-Range' => $this->etagOf('file-1'),
+        ]));
+
+        Assert::same($response->getStatusCode(), 200);
+    }
+
+    /**
+     * The date form is what download managers and curl/wget resume flows send.
+     * Treating it as a non-match turned every resume into a silent full
+     * re-download.
+     */
+    public function anIfRangeDateThatMatchesKeepsTheRange(): void
+    {
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('file-1'), [
+            'Range' => 'bytes=0-4',
+            'If-Range' => Fixtures::now()->setTimezone(new \DateTimeZone('GMT'))
+                ->format('D, d M Y H:i:s \G\M\T'),
+        ]));
+
+        Assert::same($response->getStatusCode(), 206);
     }
 
     /**
@@ -503,5 +550,61 @@ final class FileDownloadActionTest
     private function hasFile(string $id): bool
     {
         return $this->files->findInScope($id, null) instanceof \Rasuvaeff\Yii3Filestorage\File;
+    }
+
+    /**
+     * The validator has to depend on the disposition, or a cache outlives the
+     * fix. A client holding a 200 with `inline` for an SVG revalidates after
+     * the operator closes the hole; the bytes are unchanged, so a validator
+     * built from bytes alone still matches, the 304 carries no
+     * `Content-Disposition` — RFC 9110 forbids `Content-*` there — and RFC 9111
+     * has the cache keep its stored one. The `inline` would survive
+     * indefinitely.
+     */
+    public function theValidatorChangesWhenTheDispositionDoes(): void
+    {
+        $this->files->add(Fixtures::file('image', mimeType: 'image/png'));
+
+        // A group that serves inline — the default forces download, which
+        // would make both sides of this comparison the same and prove nothing.
+        $inlinePolicies = new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]);
+
+        $permissive = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: $inlinePolicies,
+            downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
+            responses: Fixtures::factory(),
+            activeMediaTypes: new ActiveMediaTypes(),
+        );
+        $inlineEtag = $permissive->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');
+
+        $strict = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: $inlinePolicies,
+            downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
+            responses: Fixtures::factory(),
+            activeMediaTypes: ActiveMediaTypes::withExtra(['image/png']),
+        );
+
+        $attachmentEtag = $strict->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');
+
+        Assert::true($inlineEtag !== $attachmentEtag, 'the two dispositions must not share a validator');
+    }
+
+    /**
+     * A 404 is heuristically cacheable, and two of the paths here are
+     * transient — a store outage, an unreadable row. An intermediary must not
+     * pin "gone" onto a token that stays valid.
+     */
+    public function aNotFoundIsNeverCached(): void
+    {
+        $response = $this->action->handle(Fixtures::request('not-a-token'));
+
+        Assert::same($response->getStatusCode(), 404);
+        Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
     }
 }

@@ -64,6 +64,16 @@ final readonly class ByteRange
             return null;
         }
 
+        // A last-byte-pos below first-byte-pos makes the spec *invalid*, not
+        // unsatisfiable, and RFC 9110 says an invalid Range field is ignored —
+        // the client gets the whole file. Answering 416 turned a malformed
+        // header into a hard error over a file the client could have had.
+        // Checked against the raw value, before the clamp to size-1 collapses
+        // `bytes=5-3` and `bytes=5-99` on a 10-byte file into the same number.
+        if ($lastPart !== '' && (int) $lastPart < $first) {
+            return false;
+        }
+
         $last = max(0, $lastPart === '' ? $size - 1 : min((int) $lastPart, $size - 1));
 
         return $last < $first ? null : new self(max(0, $first), $last);

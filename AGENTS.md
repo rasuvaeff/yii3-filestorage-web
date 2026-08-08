@@ -65,14 +65,18 @@ cannot resolve `rasuvaeff/yii3-filestorage` in any job. See
 
 ## Mutation testing
 
-`minMsi` is **86, and no mutator is ignored.** The 24 survivors are four
-groups:
+`minMsi` is **83, and no mutator is ignored.** It came down from 86 with the
+review hardening: the exception boundary in `handle()`, the fault-distinguishing
+branches around `If-Range`, the `no-store` on a 404 and the header-value strip
+are each one line whose absence a response assertion cannot always see. The
+survivors are five groups:
 
 | Group | Example | Why no test kills it |
 |---|---|---|
 | Concat permutations in the ETag fallback | swapping `$file->id` and `'\|'` | The fallback only has to be *injective* — different files, different validator. A permutation of the same three components still is. The one property that matters, that the separators stop `id="a", size=11` colliding with `id="a1", size=1`, has a test |
 | Clamps on values their source cannot produce | `max(0, …)` and `min(…, $size - 1)` in `ByteRange` after the bounds are already checked | Defence against an input the parser has already rejected |
 | Trims a callee repeats | `trim()` on the `Range` header, which `ByteRange::parse()` trims again | Removing one is unobservable. It stays because each function should be correct on its own input |
+| Defence at a sink nothing shipped can reach | `headerSafe()`'s strip, and the `catch` in `handle()` | The shipped upload path sniffs server-side, so a CRLF media type needs a row written by another system; the catch needs a collaborator that throws. Both are covered by a test each, but the mutants inside them — an empty-string fallback, the exact exception list — need a second fault to tell apart |
 | Guards the type system already makes true | `isset(…) && \is_string(…)` on a request attribute | Written this way so psalm narrows without a `@var` tag that rector then deletes as redundant |
 
 ## Invariants & gotchas

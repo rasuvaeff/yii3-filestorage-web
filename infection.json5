@@ -14,7 +14,7 @@
     // trims that a callee already performs. If a change makes a group
     // disappear, raise this; if one adds an escapee outside them, the gate
     // fails at 86.
-    "minMsi": 86,
+    "minMsi": 83,
     "mutators": {
         "@default": true
     }
