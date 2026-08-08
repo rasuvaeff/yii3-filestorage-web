@@ -49,20 +49,6 @@ make release-check
 
 `composer.lock` is gitignored (library).
 
-## Before the first release
-
-Two development-only things must go, together, when
-`rasuvaeff/yii3-filestorage` is published and tagged:
-
-- the `repositories` block in `composer.json` (a path repository pointing at
-  `../yii3-filestorage`, with a pinned `options.versions`);
-- the monorepo-root mount in the `Makefile`'s `DOCKER` variable.
-
-**Do not push this repository to GitHub before core is on Packagist.** A CI
-checkout has no sibling directory and no registry copy, so `composer install`
-cannot resolve `rasuvaeff/yii3-filestorage` in any job. See
-`docs/evolved-rules.md` ER-019.
-
 ## Mutation testing
 
 `minMsi` is **83, and no mutator is ignored.** It came down from 86 with the

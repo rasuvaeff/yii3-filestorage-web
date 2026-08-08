@@ -44,17 +44,6 @@
         "yiisoft/di": "^1.4",
         "yiisoft/test-support": "^3.0"
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../yii3-filestorage",
-            "options": {
-                "versions": {
-                    "rasuvaeff/yii3-filestorage": "0.1.0"
-                }
-            }
-        }
-    ],
     "autoload": {
         "psr-4": {
             "Rasuvaeff\\Yii3FilestorageWeb\\": "src/"
