@@ -1,0 +1,23 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "logs": {
+        "text": "php://stderr",
+        "summary": "build/infection-summary.log"
+    },
+    "testFramework": "testo",
+    // 93, and no mutator is ignored — what the suite honestly achieves
+    // (208 of 223). The 15 survivors are documented group by group in
+    // AGENTS.md, and every one of them is an equivalent mutant: a label swap
+    // that stays a bijection, a clamp against a value its source cannot
+    // produce, a boundary an earlier guard already settled, a check the callee
+    // repeats, an early return whose fall-through reaches the same answer.
+    // If a group disappears, raise this; an escapee outside them fails the
+    // gate, which is the point.
+    "minMsi": 93,
+    "mutators": {
+        "@default": true
+    }
+}
