@@ -85,13 +85,18 @@ chase them with tests that assert implementation.
   window a forward-only body by reading and discarding the prefix: that turns
   "seek to the last minute" into a full download while advertising the
   opposite.
-- **A media type is normalized once, in the action, and every consumer reads
-  the normalized value.** `Http\MediaType::headerSafe()` strips CR, LF and NUL
-  before the type is looked up in `ActiveMediaTypes`, folded into the validator
-  and written to `Content-Type`. Cleaning only where the header is written left
-  exactly one string in between: `text/ht\r\nml` misses the active-type lookup,
-  is therefore ruled inline, and then reaches the client as `text/html`. Never
-  reintroduce a second normalizer — two that disagree is the bug.
+- **One normalizer, applied at every boundary that reads a stored media type.**
+  `Http\MediaType::headerSafe()` strips CR, LF and NUL, and it is what the
+  action calls before the `ActiveMediaTypes` lookup and the validator, and what
+  `FileResponseFactory` calls before writing `Content-Type`. Cleaning *only*
+  where the header is written left exactly one string in between:
+  `text/ht\r\nml` misses the active-type lookup, is therefore ruled inline, and
+  then reaches the client as `text/html`. The bug was two different treatments
+  of one value, not two calls to one idempotent function — the factory is
+  `@api` and is called directly, so dropping its call would move the hole into
+  the public surface. Never add a *second* normalizer, and never let a caller
+  hand the factory a media type separate from the one inside its
+  `DeliveryOptions`: two arguments that can disagree is the same bug again.
 - **`ActiveMediaTypes` overrides the delivery policy, not the other way round.**
   A group configured for inline images must not become an XSS vector the day
   somebody uploads an SVG to it. SVG is the one people forget.

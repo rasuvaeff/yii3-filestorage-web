@@ -718,10 +718,15 @@ final class FileDownloadActionTest
             responses: $factory,
         );
 
-        $response = $action->handle(Fixtures::request($this->tokenFor('file-1')));
+        $token = $this->tokenFor('file-1');
+        $response = $action->handle(Fixtures::request($token));
 
         Assert::same($response->getStatusCode(), 404);
         Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
+
+        // The resolver is the only difference: the same token, the same row,
+        // the same bytes. Without this the test would pass on any other 404.
+        Assert::same($this->action->handle(Fixtures::request($token))->getStatusCode(), 200);
     }
 
     /**
