@@ -30,13 +30,16 @@ Serving a stored file over a signed URL. Namespace
 4. **Force attachment for active content.** HTML, SVG, XML and friends served
    inline from your own origin are stored XSS. The delivery policy chooses
    between download and display, not between safe and unsafe. Always add
-   `nosniff`.
+   `nosniff`. Normalize the media type once (CR, LF, NUL) *before* the
+   active-type lookup, the validator and the header — cleaning only at the
+   header lets `text/ht\r\nml` miss the list and still arrive as `text/html`.
 
 5. **Refuse a token carrying a `variant`** until the images package exists.
    Serving the original instead defeats the reason the variant is signed.
 
 6. **Advertise ranges only where they are cheap.** Ask
-   `RangeReadableStoreInterface` first, use a seekable sized stream second, and
+   `RangeReadableStoreInterface` first, use a stream that is both seekable and
+   of known size second, and
    otherwise send a full 200 with no `Accept-Ranges`. Never window a
    forward-only body by reading and discarding the prefix.
 

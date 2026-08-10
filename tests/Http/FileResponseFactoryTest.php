@@ -178,6 +178,76 @@ final class FileResponseFactoryTest
         Assert::same((string) $response->getBody(), 'hello world');
     }
 
+    /**
+     * The body in hand is what the client is told about. A row whose `size`
+     * drifted from the object — a rewrite the metadata missed — must not make
+     * `Content-Length` promise bytes that are not coming.
+     */
+    public function theLengthComesFromTheBodyWhenItKnowsItsOwn(): void
+    {
+        $response = $this->factory->create(
+            file: Fixtures::file(size: 99),
+            store: $this->store,
+            stream: $this->stream(),
+            options: Fixtures::deliveryOptions(),
+            inline: false,
+        );
+
+        Assert::same($response->getHeaderLine('Content-Length'), '11');
+    }
+
+    public function anEmptyFileIsAZeroLengthResponse(): void
+    {
+        $response = $this->factory->create(
+            file: Fixtures::file(size: 0),
+            store: $this->store,
+            stream: Fixtures::factory()->createStream(''),
+            options: Fixtures::deliveryOptions(),
+            inline: false,
+        );
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::same($response->getHeaderLine('Content-Length'), '0');
+    }
+
+    /**
+     * Both bodies that are decided against get closed. A 416 sends an empty
+     * body of its own, and a store that answered the window hands back a
+     * second stream — in each case the first one is nobody's to read, and a
+     * response never carrying it means nothing else will close it either.
+     */
+    public function theBodyItWillNotSendIsClosed(): void
+    {
+        $stream = $this->stream();
+        $response = $this->factory->create(
+            file: Fixtures::file(),
+            store: $this->store,
+            stream: $stream,
+            options: Fixtures::deliveryOptions(),
+            inline: false,
+            rangeHeader: 'bytes=99-200',
+        );
+
+        Assert::same($response->getStatusCode(), 416);
+        Assert::false($stream->isReadable());
+    }
+
+    public function theBodyReplacedByTheStoresWindowIsClosed(): void
+    {
+        $stream = new ForwardOnlyStream('hello world');
+        $response = $this->factory->create(
+            file: Fixtures::file(),
+            store: new RangeReadableStore($this->store, Fixtures::factory()),
+            stream: $stream,
+            options: Fixtures::deliveryOptions(),
+            inline: false,
+            rangeHeader: 'bytes=6-10',
+        );
+
+        Assert::same($response->getStatusCode(), 206);
+        Assert::true($stream->closed);
+    }
+
     private function create(bool $inline = false, ?string $range = null): \Psr\Http\Message\ResponseInterface
     {
         return $this->factory->create(

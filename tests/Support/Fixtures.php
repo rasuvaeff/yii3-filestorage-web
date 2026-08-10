@@ -40,21 +40,28 @@ final class Fixtures
         return new DateTimeImmutable('2026-01-01T00:00:00.000000+00:00');
     }
 
+    /**
+     * @param string $storeName Overridable because a row naming a store the
+     *        configuration no longer has is the simplest way to reach the
+     *        action's exception boundary — old rows keep the old name.
+     */
     public static function file(
         string $id = 'file-1',
         string $mimeType = 'text/plain',
         int $size = 11,
         ?string $contentHash = null,
         ?DateTimeImmutable $updatedAt = null,
+        string $storeName = 'memory',
+        ?DateTimeImmutable $createdAt = null,
     ): File {
         return File::create(
             id: $id,
-            storeName: 'memory',
+            storeName: $storeName,
             groupName: 'common',
             relativePath: 'common/ab/cd/key/original.txt',
             originalName: 'report notes.txt',
             size: $size,
-            createdAt: self::now(),
+            createdAt: $createdAt ?? self::now(),
             mimeType: $mimeType,
             contentHash: $contentHash,
             updatedAt: $updatedAt ?? self::now(),
@@ -67,6 +74,15 @@ final class Fixtures
             file: self::file(mimeType: $mimeType),
             policy: new DeliveryPolicy(allowDirectPublicUrl: false, forceDownload: $forceDownload),
         );
+    }
+
+    /**
+     * A request whose token attribute is whatever the router happened to put
+     * there — including something that is not a string at all.
+     */
+    public static function requestWithRawToken(mixed $token): ServerRequestInterface
+    {
+        return (new ServerRequest('GET', '/files/'))->withAttribute('token', $token);
     }
 
     /**

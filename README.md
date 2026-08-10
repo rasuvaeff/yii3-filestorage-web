@@ -74,6 +74,7 @@ private stores the moment this package is installed, because core declares
 | **The scope comes from the token, never the request** | A signed URL is served without a session on purpose. The tenant travels inside the HMAC and is matched as a second predicate, so a leaked id resolves to nothing in another tenant |
 | **Conditional requests are answered before the store is opened** | A `304` costs one metadata read. It also means a client with a current copy still gets `304` when the object itself has gone |
 | **Active content is an attachment whatever the policy says** | HTML, SVG, XML and friends served inline from your origin are stored XSS. `nosniff` stops a browser from finding one where the media type says there is none |
+| **The media type is normalized once, before anything reads it** | CR, LF and NUL are stripped before the type is matched against the active list, put in the validator and written to `Content-Type`. Deciding on the raw value and cleaning only at the header is how a stored `text/ht\r\nml` misses the list and still arrives as `text/html`, inline |
 | **A token minted for a variant is not served the original** | The variant is inside the signature so a thumbnail URL cannot be replayed for the full-resolution file |
 
 ## Ranges
@@ -84,17 +85,23 @@ about the *store*:
 | Store | Result |
 |---|---|
 | Implements `RangeReadableStoreInterface` | The store is asked for the window — one ranged read |
-| Does not, but the body is seekable and sized (a local file) | Windowed with a seek |
-| Neither, which is every object store | No `Accept-Ranges`, and a `Range` request gets a correct full `200` |
+| Does not, but the body is seekable and reports its size (a local file) | Windowed with a seek |
+| Neither: no range primitive, and a body that is forward-only or of unknown size | No `Accept-Ranges`, and a `Range` request gets a correct full `200` |
+
+The last row is what an object store's `readStream()` gives today, so that is
+where an S3 or Flysystem-backed group lands — but it is the two capabilities
+that are checked, never the kind of store.
 
 Single ranges only: `206`, `Content-Range`, `Content-Length`, and `416` with
 `bytes */size` for a request past the end. A multi-range request gets the whole
 representation, which RFC 9110 permits. `If-Range` is honoured, so a resumed
 download of a file that changed restarts instead of splicing two files together.
 
-For S3 the better answer is a presigned URL, which S3 ranges natively — the
-delivery policy decides, and `urlFor()` prefers the presigned one when the store
-can produce a policy-compliant one.
+For S3 the better answer is a presigned URL: S3 serves ranges on it natively.
+The delivery policy decides — `urlFor()` returns the presigned URL when the
+policy allows one *and* the store can encode that policy into it (the
+disposition and content type it demands); otherwise the signed proxy URL this
+package mints stands in.
 
 > **Why not `yiisoft/response-download`?** It was evaluated. Its master branch
 > covers most of the response half, including ranges — but none of that is in

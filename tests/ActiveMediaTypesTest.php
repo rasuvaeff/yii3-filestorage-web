@@ -62,9 +62,15 @@ final class ActiveMediaTypesTest
 
     public function anApplicationCanAddToTheList(): void
     {
-        $types = ActiveMediaTypes::withExtra(['application/x-custom-script']);
+        // More than one, because a list that kept only the first extra type
+        // would pass every single-item test and quietly drop the rest.
+        $types = ActiveMediaTypes::withExtra([
+            'application/x-custom-script',
+            'application/x-second-script',
+        ]);
 
         Assert::true($types->contains('application/x-custom-script'));
+        Assert::true($types->contains('application/x-second-script'));
         // added to the defaults, not replacing them
         Assert::true($types->contains('image/svg+xml'));
     }

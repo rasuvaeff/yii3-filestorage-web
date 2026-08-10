@@ -22,6 +22,7 @@ use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
 use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
+use Rasuvaeff\Yii3FilestorageWeb\Http\MediaType;
 use Yiisoft\Http\Header;
 use Yiisoft\Http\Status;
 
@@ -122,9 +123,15 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         // validator has to depend on it. Bytes alone are not what a cache
         // stores: it stores the response, disposition included.
         $options = DeliveryOptions::fromFile($file, $this->deliveryPolicies->for($file->groupName));
-        $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($options->responseMediaType);
 
-        $etag = $this->etag($file, $options, $inline);
+        // Normalized once, here, and not again where the header is written:
+        // deciding on the raw type and cleaning only on the way out is how a
+        // stored `text/ht\r\nml` misses the active-type lookup and is then
+        // emitted as `text/html`, inline. {@see MediaType}.
+        $mediaType = MediaType::headerSafe($options->responseMediaType);
+        $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($mediaType);
+
+        $etag = $this->etag($file, $mediaType, $inline);
         if ($this->isCurrent($request, $etag, $file->updatedAt)) {
             return $this->validators($this->responses->createResponse(Status::NOT_MODIFIED), $etag, $file);
         }
@@ -174,11 +181,11 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      *
      * @return non-empty-string
      */
-    private function etag(File $file, DeliveryOptions $options, bool $inline): string
+    private function etag(File $file, string $mediaType, bool $inline): string
     {
         $strong = $file->contentHash !== null;
         $source = $file->contentHash ?? ($file->id . '|' . $file->size . '|' . $file->updatedAt->format('U.u'));
-        $source .= '|' . ($inline ? 'inline' : 'attachment') . '|' . $options->responseMediaType;
+        $source .= '|' . ($inline ? 'inline' : 'attachment') . '|' . $mediaType;
 
         // Marked weak when it is weak. The fallback triple does not prove two
         // responses are byte-identical — an in-place rewrite that preserves

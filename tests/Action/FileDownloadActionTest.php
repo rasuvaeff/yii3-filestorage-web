@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Rasuvaeff\Yii3FilestorageWeb\Tests\Action;
 
+use DateTimeImmutable;
+use Psr\Http\Message\ServerRequestInterface;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
@@ -16,6 +18,8 @@ use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\InMemoryResolver;
+use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\ThrowingResolver;
+use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\UntrimmedRequest;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Data\DataProvider;
@@ -504,6 +508,245 @@ final class FileDownloadActionTest
         $response = $action->handle(Fixtures::request($this->tokenFor('image')));
 
         Assert::string($response->getHeaderLine('Content-Disposition'))->contains('inline');
+    }
+
+    /**
+     * The router puts whatever matched into the attribute, and a route this
+     * package does not own can put anything there at all. A non-string is not
+     * a token — passing it to the signer would be a `TypeError` where the
+     * contract promises a 404.
+     */
+    public function aTokenAttributeThatIsNotAStringIsRefused(): void
+    {
+        Assert::same(
+            $this->action->handle(Fixtures::requestWithRawToken(['not', 'a', 'string']))->getStatusCode(),
+            404,
+        );
+    }
+
+    /**
+     * Each component of the fallback validator has to move it *on its own*.
+     * The id is in the validator too, so varying it alongside the component
+     * under test would let an operand that stopped contributing pass: the same
+     * row is rewritten in place instead.
+     */
+    public function eachFallbackComponentMovesTheEtagOnItsOwn(): void
+    {
+        $this->files->add(Fixtures::file('rewritten', size: 10));
+        $original = $this->etagOf('rewritten');
+
+        $this->files->add(Fixtures::file('rewritten', size: 20));
+        Assert::true($original !== $this->etagOf('rewritten'), 'the size alone must move it');
+
+        $this->files->add(Fixtures::file('rewritten', size: 10, updatedAt: Fixtures::now()->modify('+1 second')));
+        Assert::true($original !== $this->etagOf('rewritten'), 'updatedAt alone must move it');
+
+        $this->files->add(Fixtures::file('rewritten', mimeType: 'text/csv', size: 10));
+        Assert::true($original !== $this->etagOf('rewritten'), 'the media type alone must move it');
+    }
+
+    /**
+     * And it holds for an inline response, where the disposition is the shorter
+     * of the two labels: a validator built by concatenation can lose the media
+     * type on exactly one branch of that ternary.
+     */
+    public function theMediaTypeMovesTheValidatorForAnInlineResponseToo(): void
+    {
+        $action = $this->actionWithPolicy(new DeliveryPolicy(forceDownload: false));
+
+        $this->files->add(Fixtures::file('inline-typed', mimeType: 'image/png'));
+        $png = $action->handle(Fixtures::request($this->tokenFor('inline-typed')))->getHeaderLine('ETag');
+
+        $this->files->add(Fixtures::file('inline-typed', mimeType: 'image/gif'));
+        $gif = $action->handle(Fixtures::request($this->tokenFor('inline-typed')))->getHeaderLine('ETag');
+
+        Assert::true($png !== $gif, 'an inline response must fold its media type in too');
+    }
+
+    /**
+     * The separator before the timestamp does the same job as the one after the
+     * id. `size=1` at `1767225600` and `size=11` at `767225600` — an archive
+     * imported with its original mtime — run together into the same
+     * `11767225600.000000` without it, and the two files then share a
+     * validator.
+     */
+    public function theSeparatorBeforeTheTimestampPreventsACollision(): void
+    {
+        $this->files->add(Fixtures::file('collide', size: 1, updatedAt: new DateTimeImmutable('@1767225600')));
+        $first = $this->etagOf('collide');
+
+        $this->files->add(Fixtures::file(
+            'collide',
+            size: 11,
+            updatedAt: new DateTimeImmutable('@767225600'),
+            createdAt: new DateTimeImmutable('@767225600'),
+        ));
+
+        Assert::true($first !== $this->etagOf('collide'));
+    }
+
+    /**
+     * Trimming is this class's own job, not the message layer's. Nyholm trims
+     * on the way in; a server that hands the value through untouched must get
+     * the same answers, or a conditional request silently stops matching for
+     * whoever sent the whitespace.
+     */
+    public function conditionalHeadersAreTrimmedByTheActionItself(): void
+    {
+        $token = $this->tokenFor('file-1');
+        $etag = $this->etagOf('file-1');
+        $lastModified = Fixtures::now()->format('D, d M Y H:i:s \G\M\T');
+
+        Assert::same(
+            $this->action->handle($this->untrimmed($token, 'If-None-Match', "  {$etag}  "))->getStatusCode(),
+            304,
+            'a padded If-None-Match still matches',
+        );
+
+        Assert::same(
+            $this->action->handle(
+                $this->untrimmed($token, 'If-Modified-Since', "  {$lastModified}  "),
+            )->getStatusCode(),
+            304,
+            'a padded If-Modified-Since is still a date',
+        );
+
+        // Whitespace is not a validator: an If-None-Match of nothing but spaces
+        // must fall through to If-Modified-Since rather than count as a
+        // mismatch that forces a 200.
+        $blank = $this->untrimmed($token, 'If-None-Match', '   ')
+            ->withHeader('If-Modified-Since', $lastModified);
+
+        Assert::same($this->action->handle($blank)->getStatusCode(), 304);
+    }
+
+    /**
+     * `If-Range` has to be trimmed for the same reason, and the consequence is
+     * heavier: an untrimmed value does not start with `"`, so it is read as a
+     * date, fails to parse, and the resume turns into a full re-download.
+     */
+    public function anIfRangeIsTrimmedBeforeItIsClassified(): void
+    {
+        $this->files->add(Fixtures::file('hashed', contentHash: str_repeat('a', 64)));
+        $token = $this->tokenFor('hashed');
+        $etag = $this->etagOf('hashed');
+
+        $request = $this->untrimmed($token, 'If-Range', "  {$etag}  ")
+            ->withHeader('Range', 'bytes=0-4');
+
+        Assert::same($this->action->handle($request)->getStatusCode(), 206);
+    }
+
+    /**
+     * A strong validator that is not ours is still not a match. Both halves of
+     * the condition matter: the ETag has to be equal *and* strong, and a test
+     * using the weak fallback cannot tell the two halves apart.
+     */
+    public function aStrongIfRangeFromAnotherFileDropsTheRange(): void
+    {
+        $this->files->add(Fixtures::file('hashed', contentHash: str_repeat('a', 64)));
+
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('hashed'), [
+            'Range' => 'bytes=0-4',
+            'If-Range' => '"0123456789abcdef0123456789abcdef"',
+        ]));
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::same((string) $response->getBody(), 'hello world');
+    }
+
+    private function untrimmed(string $token, string $header, string $value): ServerRequestInterface
+    {
+        return (new UntrimmedRequest('GET', '/files/' . $token))
+            ->withAttribute('token', $token)
+            ->withUntrimmedHeader($header, $value);
+    }
+
+    /**
+     * The interior CRLF is the one media type that used to reach the client as
+     * active content served inline: the disposition was decided on the raw
+     * value, which misses the active-type lookup, and the header was cleaned
+     * only on the way out. Both ends read the same normalized value now.
+     */
+    public function aCrlfMediaTypeCannotSmuggleActiveContentInline(): void
+    {
+        $action = $this->actionWithPolicy(new DeliveryPolicy(forceDownload: false));
+        $this->files->add(Fixtures::file('smuggled', mimeType: "text/ht\r\nml"));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('smuggled')));
+
+        Assert::same($response->getHeaderLine('Content-Type'), 'text/html');
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
+        Assert::same($response->getHeaderLine('X-Content-Type-Options'), 'nosniff');
+    }
+
+    /**
+     * Three collaborators throw where the rest of the action returns null, and
+     * the contract is that they answer the same 404 — a 500 on a download route
+     * distinguishes "this id exists but something is wrong with it" from "no
+     * such id", which is the fact an opaque token exists to withhold.
+     */
+    public function aRowNamingAnUnregisteredStoreIsNotFound(): void
+    {
+        // Configuration dropped the store; the rows keep the old name.
+        $this->files->add(Fixtures::file('decommissioned', storeName: 'gone'));
+
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('decommissioned')));
+
+        Assert::same($response->getStatusCode(), 404);
+        Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
+
+        // The store name is the only difference — otherwise this passes on any
+        // other 404, a missing object above all.
+        $this->files->add(Fixtures::file('decommissioned'));
+
+        Assert::same(
+            $this->action->handle(Fixtures::request($this->tokenFor('decommissioned')))->getStatusCode(),
+            200,
+        );
+    }
+
+    public function aResolverThatThrowsIsNotFound(): void
+    {
+        $factory = Fixtures::factory();
+        $action = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: new ThrowingResolver(),
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: new DeliveryPolicyRegistry(),
+            downloads: new FileResponseFactory($factory, $factory),
+            responses: $factory,
+        );
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('file-1')));
+
+        Assert::same($response->getStatusCode(), 404);
+        Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
+    }
+
+    /**
+     * Normalization strips what splits a header, not everything a strict PSR-7
+     * implementation refuses. What is left throws from `withHeader()`, and that
+     * is a 404 too.
+     */
+    public function aMediaTypeThePsr7ImplementationRefusesIsNotFound(): void
+    {
+        $this->files->add(Fixtures::file('control-char', mimeType: "text/\x01plain"));
+
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('control-char')));
+
+        Assert::same($response->getStatusCode(), 404);
+        Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
+
+        // The media type is the only difference: the same row, the same bytes,
+        // a type the implementation accepts. Without this the test would pass
+        // just as well on a missing object, which is a different 404.
+        $this->files->add(Fixtures::file('control-char', mimeType: 'text/plain'));
+
+        Assert::same(
+            $this->action->handle(Fixtures::request($this->tokenFor('control-char')))->getStatusCode(),
+            200,
+        );
     }
 
     private function actionWithPolicy(DeliveryPolicy $policy): FileDownloadAction

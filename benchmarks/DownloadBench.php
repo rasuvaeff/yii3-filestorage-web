@@ -29,6 +29,9 @@ final class DownloadBench
     private static ?HmacUrlSigner $signer = null;
     private static ?string $token = null;
 
+    /** @var array<string, int>|null */
+    private static ?array $flipped = null;
+
     /**
      * Verification runs on every request, valid or not, so it is the floor on
      * what a download costs. Against the raw HMAC it wraps.
@@ -105,9 +108,17 @@ final class DownloadBench
         return (new ActiveMediaTypes())->contains('text/html; charset=utf-8');
     }
 
+    /**
+     * The map is built once and kept, because the comparison is scan-versus-
+     * lookup. Flipping the list inside the measured callable would price a
+     * hash map at the cost of constructing one per request, which is not what
+     * anyone would write.
+     */
     public static function flippedLookup(): bool
     {
-        return isset(array_flip(ActiveMediaTypes::DEFAULT)['text/html']);
+        self::$flipped ??= array_flip(ActiveMediaTypes::DEFAULT);
+
+        return isset(self::$flipped['text/html']);
     }
 
     private static function signer(): HmacUrlSigner

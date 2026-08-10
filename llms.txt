@@ -63,13 +63,24 @@ new FileDownloadAction(
 );
 ```
 
-Order: verify token → refuse a variant → resolve in scope → ETag/`304` →
-open the store → delivery policy → response → `nosniff`.
+Order: verify token → refuse a variant → resolve in scope → delivery policy
+(disposition, media type) → ETag/`304` → open the store → response →
+`nosniff`. The delivery decision comes *before* the validator because the
+validator depends on it.
 
-ETag is the content hash when there is one, else a hash of
-`id|size|updatedAt`. `If-None-Match` (including `W/` and `*`) wins over
-`If-Modified-Since`, per RFC 9110. `Last-Modified` and `Cache-Control` are on
-both the `200` and the `304`.
+ETag hashes the content hash when there is one, else the triple
+`id|size|updatedAt`; the disposition (`inline`/`attachment`) and the normalized
+media type are appended in both cases. Without a content hash it is marked
+weak (`W/`) — enough for `If-None-Match`, never enough for `If-Range`.
+`If-None-Match` (including `W/` and `*`) wins over `If-Modified-Since`, per RFC
+9110. `Last-Modified` and `Cache-Control` are on both the `200` and the `304`.
+
+A media type is normalized once (CR, LF and NUL stripped; empty becomes
+`application/octet-stream`) before it is looked up in `ActiveMediaTypes`, put
+in the ETag or written to `Content-Type` — deciding on the raw value and
+cleaning only at the header is how `text/ht\r\nml` gets served inline as
+`text/html`. Anything the PSR-7 implementation still refuses is a 404, like
+every other failure.
 
 ### `Url\HmacProxyUrlGenerator` (`ProxyUrlGeneratorInterface`)
 

@@ -51,19 +51,18 @@ make release-check
 
 ## Mutation testing
 
-`minMsi` is **83, and no mutator is ignored.** It came down from 86 with the
-review hardening: the exception boundary in `handle()`, the fault-distinguishing
-branches around `If-Range`, the `no-store` on a 404 and the header-value strip
-are each one line whose absence a response assertion cannot always see. The
-survivors are five groups:
+`minMsi` is **93, and no mutator is ignored** — 208 of 223 mutants killed. The
+15 survivors are five groups, and every one of them is an equivalent mutant:
+there is no input for which the mutated program answers differently. Do not
+chase them with tests that assert implementation.
 
 | Group | Example | Why no test kills it |
 |---|---|---|
-| Concat permutations in the ETag fallback | swapping `$file->id` and `'\|'` | The fallback only has to be *injective* — different files, different validator. A permutation of the same three components still is. The one property that matters, that the separators stop `id="a", size=11` colliding with `id="a1", size=1`, has a test |
-| Clamps on values their source cannot produce | `max(0, …)` and `min(…, $size - 1)` in `ByteRange` after the bounds are already checked | Defence against an input the parser has already rejected |
-| Trims a callee repeats | `trim()` on the `Range` header, which `ByteRange::parse()` trims again | Removing one is unobservable. It stays because each function should be correct on its own input |
-| Defence at a sink nothing shipped can reach | `headerSafe()`'s strip, and the `catch` in `handle()` | The shipped upload path sniffs server-side, so a CRLF media type needs a row written by another system; the catch needs a collaborator that throws. Both are covered by a test each, but the mutants inside them — an empty-string fallback, the exact exception list — need a second fault to tell apart |
-| Guards the type system already makes true | `isset(…) && \is_string(…)` on a request attribute | Written this way so psalm narrows without a `@var` tag that rector then deletes as redundant |
+| ETag permutations that stay injective | swapping the `inline`/`attachment` labels; moving a `'\|'` to the end | The validator only has to be *injective* — different files, different validator — and a bijective relabelling still is. The permutations that would break injectivity are killed: the separator between id and size, and the one before the timestamp, each have a collision test built from two real files |
+| Clamps on values their source cannot produce | `max(0, …)` in `ByteRange` and in the size the response reports, after `$size === 0` and `$first >= $size` are already refused | Defence against an input the parser rejected upstream |
+| Boundaries an earlier guard already settled | `$first >= $size` weakened to `>` | With `$size === 0` refused above, `$first === $size` falls through to `$last < $first` and returns the same `null` |
+| Checks a callee repeats | `trim()` on `Range` (`ByteRange::parse()` trims again); `(int)` on a digits-only capture; `explode(';', …, 2)` raised to `3` | Unobservable from outside. They stay because each function should be correct on its own input. The three *other* trims — `If-None-Match`, `If-Modified-Since`, `If-Range` — are not repeated anywhere and are covered by a request double that does not trim |
+| Early returns whose fall-through lands on the same answer | `if ($ifModifiedSince === '') { return false; }` | An empty date fails to parse and yields `false` two lines later; an empty `Range` reaches the factory, which treats `''` and `null` alike |
 
 ## Invariants & gotchas
 
@@ -81,10 +80,18 @@ survivors are five groups:
 - **`If-Range` mismatch means send the whole file.** Resuming a download across
   a change splices two different files into one.
 - **Ranges follow the store, not the stream.** `RangeReadableStoreInterface`
-  first, a seekable sized body second, otherwise no `Accept-Ranges`. Never
+  first, a body that is both seekable and of known size second, otherwise no
+  `Accept-Ranges`. Never
   window a forward-only body by reading and discarding the prefix: that turns
   "seek to the last minute" into a full download while advertising the
   opposite.
+- **A media type is normalized once, in the action, and every consumer reads
+  the normalized value.** `Http\MediaType::headerSafe()` strips CR, LF and NUL
+  before the type is looked up in `ActiveMediaTypes`, folded into the validator
+  and written to `Content-Type`. Cleaning only where the header is written left
+  exactly one string in between: `text/ht\r\nml` misses the active-type lookup,
+  is therefore ruled inline, and then reaches the client as `text/html`. Never
+  reintroduce a second normalizer — two that disagree is the bug.
 - **`ActiveMediaTypes` overrides the delivery policy, not the other way round.**
   A group configured for inline images must not become an XSS vector the day
   somebody uploads an SVG to it. SVG is the one people forget.

@@ -16,6 +16,12 @@ use RuntimeException;
  */
 class ForwardOnlyStream implements StreamInterface
 {
+    /**
+     * Recorded rather than acted on: what matters is that the factory releases
+     * the body it decided not to send, and a no-op `close()` cannot show it.
+     */
+    public bool $closed = false;
+
     private int $position = 0;
 
     public function __construct(private readonly string $body) {}
@@ -27,7 +33,10 @@ class ForwardOnlyStream implements StreamInterface
     }
 
     #[Override]
-    public function close(): void {}
+    public function close(): void
+    {
+        $this->closed = true;
+    }
 
     #[Override]
     public function detach()

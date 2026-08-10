@@ -23,7 +23,7 @@ final class ByteRangeTest
         $range = ByteRange::parse($header, $size);
 
         Assert::instanceOf($range, ByteRange::class);
-        Assert::same([($range ?? $this->any())->first, ($range ?? $this->any())->last], $expected);
+        Assert::same([$range->first, $range->last], $expected);
     }
 
     /**
@@ -35,6 +35,10 @@ final class ByteRangeTest
         yield 'an open-ended range' => ['bytes=90-', 100, [90, 99]];
         yield 'a suffix range' => ['bytes=-10', 100, [90, 99]];
         yield 'a suffix longer than the file' => ['bytes=-500', 100, [0, 99]];
+        // The clamp on the last byte has to be to `size - 1`, and a one-byte
+        // file is where an off-by-one in it stops hiding behind the file size.
+        yield 'a suffix on a one-byte file' => ['bytes=-1', 1, [0, 0]];
+        yield 'a suffix longer than a one-byte file' => ['bytes=-5', 1, [0, 0]];
         yield 'the whole thing' => ['bytes=0-99', 100, [0, 99]];
         yield 'one byte' => ['bytes=5-5', 100, [5, 5]];
         yield 'an end past the file is clamped' => ['bytes=95-1000', 100, [95, 99]];
@@ -92,19 +96,25 @@ final class ByteRangeTest
 
     public function lengthIsInclusiveOfBothEnds(): void
     {
-        Assert::same((ByteRange::parse('bytes=0-0', 100) ?: $this->any())->length(), 1);
-        Assert::same((ByteRange::parse('bytes=0-9', 100) ?: $this->any())->length(), 10);
-        Assert::same((ByteRange::parse('bytes=90-', 100) ?: $this->any())->length(), 10);
+        Assert::same($this->parsed('bytes=0-0', 100)->length(), 1);
+        Assert::same($this->parsed('bytes=0-9', 100)->length(), 10);
+        Assert::same($this->parsed('bytes=90-', 100)->length(), 10);
     }
 
     public function theContentRangeHeaderNamesTheWholeSize(): void
     {
-        Assert::same((ByteRange::parse('bytes=0-4', 100) ?: $this->any())->contentRange(100), 'bytes 0-4/100');
+        Assert::same($this->parsed('bytes=0-4', 100)->contentRange(100), 'bytes 0-4/100');
     }
 
-    private function any(): ByteRange
+    /**
+     * A header these tests have already established as satisfiable. The
+     * assertion is what narrows `ByteRange|false|null` for psalm; a `?:`
+     * fallback narrowed it too, and quietly measured a substitute range when
+     * the parse regressed.
+     */
+    private function parsed(string $header, int $size): ByteRange
     {
-        $range = ByteRange::parse('bytes=0-0', 1);
+        $range = ByteRange::parse($header, $size);
         \assert($range instanceof ByteRange);
 
         return $range;

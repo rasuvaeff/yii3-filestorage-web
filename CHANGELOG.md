@@ -14,7 +14,10 @@ Initial development. Not released.
   hand out one of its own, with the tenant scope stamped in at minting time.
 - `Action\FileDownloadAction`: token verification, scope-matched resolution,
   conditional GET answered before the store is opened, delivery policy applied,
-  and active content forced to an attachment with `nosniff`.
+  and active content forced to an attachment with `nosniff`. The media type is
+  normalized once — `Http\MediaType` — before the active-content lookup, the
+  validator and the header, so a stored `text/ht\r\nml` cannot miss the list and
+  still reach the client as `text/html`, inline.
 - `Http\FileResponseFactory` and `Http\ByteRange`: single byte ranges, `206`,
   `416`, `Accept-Ranges`, taking the window from the *store* when it has a
   range primitive and from the stream when it is seekable.
