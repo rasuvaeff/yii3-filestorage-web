@@ -65,6 +65,6 @@ final readonly class ActiveMediaTypes
         // is every bit as executable as `text/html`.
         $type = strtolower(trim(explode(';', $mediaType, 2)[0]));
 
-        return \in_array($type, $this->types, true);
+        return \in_array($type, $this->types, strict: true);
     }
 }
