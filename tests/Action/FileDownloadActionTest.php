@@ -6,8 +6,12 @@ namespace Rasuvaeff\Yii3FilestorageWeb\Tests\Action;
 
 use DateTimeImmutable;
 use Psr\Http\Message\ServerRequestInterface;
+use Rasuvaeff\Understudy\Arg;
+use Rasuvaeff\Understudy\Understudy;
+use Rasuvaeff\Yii3Filestorage\Exception\StoreException;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
+use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
 use Rasuvaeff\Yii3Filestorage\Test\InMemoryStore;
 use Rasuvaeff\Yii3Filestorage\Upload;
@@ -18,7 +22,6 @@ use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\InMemoryResolver;
-use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\ThrowingResolver;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\UntrimmedRequest;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -26,6 +29,8 @@ use Testo\Data\DataProvider;
 use Testo\Lifecycle\BeforeTest;
 use Testo\Test;
 use Yiisoft\Test\Support\Clock\StaticClock;
+
+use function Rasuvaeff\Understudy\when;
 
 #[Test]
 #[Covers(FileDownloadAction::class)]
@@ -709,9 +714,11 @@ final class FileDownloadActionTest
     public function aResolverThatThrowsIsNotFound(): void
     {
         $factory = Fixtures::factory();
+        $files = Understudy::for(ScopedFileResolverInterface::class);
+        when(fn() => $files->findInScope(Arg::any(), Arg::any()))->throws(new StoreException('the row cannot be read'));
         $action = new FileDownloadAction(
             signer: Fixtures::signer(),
-            files: new ThrowingResolver(),
+            files: $files,
             stores: new StoreRegistry([$this->store]),
             deliveryPolicies: new DeliveryPolicyRegistry(),
             downloads: new FileResponseFactory($factory, $factory),
