@@ -13,6 +13,8 @@ use Rasuvaeff\Yii3Filestorage\Policy\DeliveryOptions;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
+use Yiisoft\Router\CurrentRoute;
+use Yiisoft\Router\Route;
 use Yiisoft\Test\Support\Clock\StaticClock;
 
 /**
@@ -83,6 +85,30 @@ final class Fixtures
     public static function requestWithRawToken(mixed $token): ServerRequestInterface
     {
         return (new ServerRequest('GET', '/files/'))->withAttribute('token', $token);
+    }
+
+    /**
+     * The request as `yiisoft/router` hands it to an action: matched, but
+     * carrying no token attribute — that router keeps its arguments in
+     * CurrentRoute and never copies them into the request.
+     */
+    public static function routedRequest(string $token): ServerRequestInterface
+    {
+        return new ServerRequest('GET', '/files/' . $token);
+    }
+
+    /**
+     * A CurrentRoute holding what the router matched, the way the Router
+     * middleware leaves it behind for the action.
+     *
+     * @param array<string, string> $arguments
+     */
+    public static function currentRoute(array $arguments): CurrentRoute
+    {
+        $current = new CurrentRoute();
+        $current->setRouteWithArguments(Route::get('/files/{token}'), $arguments);
+
+        return $current;
     }
 
     /**

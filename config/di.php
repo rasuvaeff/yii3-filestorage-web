@@ -17,6 +17,7 @@ use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
 use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
+use Yiisoft\Router\CurrentRoute;
 
 /** @var array $params */
 
@@ -63,6 +64,12 @@ return [
         StreamFactoryInterface $streams,
     ): FileResponseFactory => new FileResponseFactory(responses: $responses, streams: $streams),
 
+    // `currentRoute` is the optional-dep half of the token lookup: nullable
+    // with a default, so a container without yiisoft/router resolves it to
+    // null (yiisoft/di gives optional parameters their default when the class
+    // cannot be resolved) and the action reads the token from the request
+    // attribute alone. In a yiisoft/router application CurrentRoute is the
+    // same singleton the Router middleware populated.
     FileDownloadAction::class => static fn (
         UrlSignerInterface $signer,
         ScopedFileResolverInterface $files,
@@ -71,6 +78,7 @@ return [
         FileResponseFactory $downloads,
         ResponseFactoryInterface $responses,
         ActiveMediaTypes $activeMediaTypes,
+        ?CurrentRoute $currentRoute = null,
     ): FileDownloadAction => new FileDownloadAction(
         signer: $signer,
         files: $files,
@@ -78,6 +86,7 @@ return [
         deliveryPolicies: $deliveryPolicies,
         downloads: $downloads,
         responses: $responses,
+        currentRoute: $currentRoute,
         activeMediaTypes: $activeMediaTypes,
         cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
         tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],

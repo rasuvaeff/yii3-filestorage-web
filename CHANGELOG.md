@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- `FileDownloadAction` reads the download token from `yiisoft/router`'s
+  `CurrentRoute` when the request attribute is absent. That router never
+  copies its arguments into request attributes, so the route recipe in the
+  README answered 404 to *every* download — valid token or not — in an
+  application without a middleware that copies them. The attribute stays the
+  first source and wins when both are present; `yiisoft/router` is a `suggest`
+  (optional) dependency, and a container without it resolves the new nullable
+  `currentRoute` parameter to null. Fixes #5.
 - Wire `AddNameToLiteralArgumentRector` into `rector.php`. The rule shipped in
   `require-dev` from the first release but was never listed in the config, so it
   had never run. Enabling it names the `strict` flag of the `in_array()` call in

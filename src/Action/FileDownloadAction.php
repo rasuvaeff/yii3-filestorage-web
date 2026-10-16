@@ -25,6 +25,7 @@ use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Http\MediaType;
 use Yiisoft\Http\Header;
 use Yiisoft\Http\Status;
+use Yiisoft\Router\CurrentRoute;
 
 /**
  * Serves a stored file over a signed URL.
@@ -60,8 +61,15 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
     private const string HTTP_DATE = 'D, d M Y H:i:s \G\M\T';
 
     /**
-     * @param string $tokenAttribute The request attribute the router puts the
-     *        token in — `Route::get('/files/{token}')` gives `token`.
+     * @param CurrentRoute|null $currentRoute Where `yiisoft/router` keeps the
+     *        matched arguments instead of the request: it never copies them
+     *        into attributes, so without this fallback a route registered
+     *        exactly as the README shows answered 404 to every download. Null
+     *        in a stack that is not yiisoft/router — the attribute is then the
+     *        only source.
+     * @param string $tokenAttribute The name of both sources at once: the
+     *        request attribute a router may set, and the route placeholder —
+     *        `Route::get('/files/{token}')` gives `token`.
      */
     public function __construct(
         private UrlSignerInterface $signer,
@@ -70,6 +78,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         private DeliveryPolicyRegistry $deliveryPolicies,
         private FileResponseFactory $downloads,
         private ResponseFactoryInterface $responses,
+        private ?CurrentRoute $currentRoute = null,
         private ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
         private string $cacheControl = 'private, max-age=3600',
         private string $tokenAttribute = 'token',
@@ -102,10 +111,18 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         // call's `mixed` would need a `@var` tag that rector deletes as
         // redundant.
         $attributes = $request->getAttributes();
-        $payload = isset($attributes[$this->tokenAttribute])
+        $token = isset($attributes[$this->tokenAttribute])
             && \is_string($attributes[$this->tokenAttribute])
-                ? $this->signer->verify($attributes[$this->tokenAttribute])
-                : null;
+                ? $attributes[$this->tokenAttribute]
+                // yiisoft/router keeps its arguments in CurrentRoute and never
+                // copies them into the request, so with that router the
+                // attribute above is absent from the README's own recipe and
+                // every download answered 404. The attribute stays the first
+                // source: a stack that does set one — another router, a
+                // copy-middleware — keeps working, and when both are present
+                // the request wins.
+                : $this->currentRoute?->getArgument($this->tokenAttribute);
+        $payload = \is_string($token) ? $this->signer->verify($token) : null;
 
         // A variant is a rendition the images package produces. Until it
         // exists, a token asking for one must not quietly get the original —

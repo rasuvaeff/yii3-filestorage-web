@@ -43,7 +43,12 @@
         "testo/testo": "^0.10.25",
         "vimeo/psalm": "^6.16",
         "yiisoft/di": "^1.4",
+        "yiisoft/router": "^4.0",
+        "yiisoft/router-fastroute": "^4.0",
         "yiisoft/test-support": "^3.1"
+    },
+    "suggest": {
+        "yiisoft/router": "Route-argument fallback for the download token: the router keeps matched arguments in CurrentRoute and never copies them into the request"
     },
     "autoload": {
         "psr-4": {

@@ -62,6 +62,13 @@ Keep the route and the `route` param in step — one is what the router matches,
 the other is what goes into every URL. Generate a key with
 `php -r "echo bin2hex(random_bytes(32));"`; anything under 32 bytes is refused.
 
+The action reads the token from a request attribute named by `tokenAttribute`
+and falls back to the route argument of the same name in `yiisoft/router`'s
+`CurrentRoute` — that router never copies its arguments into the request, and
+without the fallback this exact recipe answered 404 to every download. When
+both sources are present the request attribute wins, so a stack that sets
+attributes itself — another router, a copy-middleware — keeps working.
+
 That is all the wiring. `Storage::urlFor()` starts returning signed URLs for
 private stores the moment this package is installed, because core declares
 `ProxyUrlGeneratorInterface` optional and leaves it unbound for exactly this.
