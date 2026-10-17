@@ -27,6 +27,11 @@ provides.
    says, plus `nosniff`.
 5. **A token carrying a `variant` is refused** until the images package exists —
    never served the original.
+6. **The token has two sources.** A request attribute named by
+   `tokenAttribute` first, then the route argument of the same name in
+   `yiisoft/router`'s `CurrentRoute` — that router never copies its arguments
+   into the request, so without the fallback the README route recipe answers
+   404 to every download. The attribute wins when both are present.
 6. **Ranges follow the store**: `RangeReadableStoreInterface` first, a seekable
    sized stream second, otherwise no `Accept-Ranges` and a full 200.
 
@@ -35,7 +40,7 @@ provides.
 ```php
 'rasuvaeff/yii3-filestorage-web' => [
     'route' => '/files/{token}',        // must contain {token}
-    'tokenAttribute' => 'token',        // request attribute the router fills
+    'tokenAttribute' => 'token',        // request attribute AND route placeholder name
     'cacheControl' => 'private, max-age=3600',
     'signingKeys' => ['active' => '2026-08', 'keys' => ['2026-08' => '…32+ bytes…']],
     'extraActiveMediaTypes' => [],      // added to the built-in list
@@ -43,7 +48,9 @@ provides.
 ```
 
 Route the action yourself:
-`Route::get('/files/{token}')->action(FileDownloadAction::class)`.
+`Route::get('/files/{token}')->action(FileDownloadAction::class)` — with
+`yiisoft/router` the token arrives through the `CurrentRoute` fallback, no
+attribute middleware needed.
 
 ## API reference
 
@@ -60,6 +67,7 @@ new FileDownloadAction(
     ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
     string $cacheControl = 'private, max-age=3600',
     string $tokenAttribute = 'token',
+    ?CurrentRoute $currentRoute = null,
 );
 ```
 

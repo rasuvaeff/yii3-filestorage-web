@@ -51,7 +51,7 @@ make release-check
 
 ## Mutation testing
 
-`minMsi` is **93, and no mutator is ignored** — 208 of 223 mutants killed. The
+`minMsi` is **93, and no mutator is ignored** — 210 of 225 mutants killed. The
 15 survivors are five groups, and every one of them is an equivalent mutant:
 there is no input for which the mutated program answers differently. Do not
 chase them with tests that assert implementation.
@@ -66,6 +66,25 @@ chase them with tests that assert implementation.
 
 ## Invariants & gotchas
 
+- **The token has two sources, and the order is load-bearing.** A request
+  attribute named by `tokenAttribute` first, then the route argument of the
+  same name in `CurrentRoute` (`yiisoft/router` never copies its arguments
+  into the request — without the fallback the README recipe answered 404 to
+  every download, see issue #5). `currentRoute` is an optional dependency:
+  nullable with a default, whitelisted in `composer-require-checker.json`
+  (do not delete that file), `yiisoft/router` in `suggest` + `require-dev`.
+  Do not remove the fallback, and do not invert the precedence: a stack that
+  sets attributes itself must keep winning. The regression guard is
+  `FileDownloadRouterDispatchTest` — a real `Router` + FastRoute dispatch, no
+  attribute middleware; the unit tests set the sources by hand and cannot see
+  the gap.
+- **The `currentRoute` parameter is the LAST constructor parameter, on
+  purpose.** roave compares signatures positionally: inserting a parameter in
+  the middle turns every later one into a `[BC] CHANGED` break. New optional
+  parameters go at the end. And the `->action(Handler::class)` route form
+  needs `yiisoft/middleware-dispatcher` 5.2+ (the floor `require-dev` pins) —
+  5.0 rejects a `RequestHandlerInterface` class name as a middleware
+  definition.
 - **`DATE_RFC7231` is deprecated in PHP 8.5** for ignoring the timezone it is
   given, and this package supports 8.5. The IMF-fixdate format is spelled out
   as `D, d M Y H:i:s \G\M\T` in `FileDownloadAction::HTTP_DATE`. Do not

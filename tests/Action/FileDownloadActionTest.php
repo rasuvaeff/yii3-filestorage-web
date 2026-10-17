@@ -530,6 +530,73 @@ final class FileDownloadActionTest
     }
 
     /**
+     * yiisoft/router never copies the matched arguments into the request —
+     * they live in CurrentRoute — so the README's own recipe answered 404 to
+     * every download until the action learned the second source. Here the
+     * attribute is absent and the route argument is the only place the token
+     * exists.
+     */
+    public function theTokenIsReadFromTheRouteWhenTheAttributeIsAbsent(): void
+    {
+        $token = $this->tokenFor('file-1');
+        $action = $this->routedAction(['token' => $token]);
+
+        $response = $action->handle(Fixtures::routedRequest($token));
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::same((string) $response->getBody(), 'hello world');
+    }
+
+    /**
+     * Both sources present, and they disagree. The request attribute is the
+     * one the action must use: a stack that sets attributes — another router,
+     * a copy-middleware — must not have its answer silently replaced by
+     * whatever the route matched.
+     */
+    public function theAttributeWinsOverTheRouteArgument(): void
+    {
+        $action = $this->routedAction(['token' => 'v1.k1.tampered']);
+
+        Assert::same(
+            $action->handle(Fixtures::request($this->tokenFor('file-1')))->getStatusCode(),
+            200,
+        );
+    }
+
+    /**
+     * A CurrentRoute without the placeholder — an unmatched request, a route
+     * that named its argument differently — gives no token, and the answer is
+     * the same 404 as any other missing one.
+     */
+    public function aRouteWithoutTheTokenArgumentIsNotFound(): void
+    {
+        $action = $this->routedAction(['id' => '17']);
+
+        Assert::same(
+            $action->handle(Fixtures::routedRequest('anything'))->getStatusCode(),
+            404,
+        );
+    }
+
+    /**
+     * An attribute that is not a string is not a token, and the route
+     * argument behind it still is one: the answer comes from the usable
+     * source. The mutant this pins out is the `&&` widening to `||`, which
+     * would let the unusable attribute shadow a perfectly good route
+     * argument and answer 404 to a valid URL.
+     */
+    public function aNonStringAttributeFallsBackToTheRouteArgument(): void
+    {
+        $token = $this->tokenFor('file-1');
+        $action = $this->routedAction(['token' => $token]);
+
+        Assert::same(
+            $action->handle(Fixtures::requestWithRawToken(['not', 'a', 'string']))->getStatusCode(),
+            200,
+        );
+    }
+
+    /**
      * Each component of the fallback validator has to move it *on its own*.
      * The id is in the validator too, so varying it alongside the component
      * under test would let an operand that stopped contributing pass: the same
@@ -772,6 +839,24 @@ final class FileDownloadActionTest
             deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy]),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
+        );
+    }
+
+    /**
+     * @param array<string, string> $arguments
+     */
+    private function routedAction(array $arguments): FileDownloadAction
+    {
+        $factory = Fixtures::factory();
+
+        return new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: new DeliveryPolicyRegistry(),
+            downloads: new FileResponseFactory($factory, $factory),
+            responses: $factory,
+            currentRoute: Fixtures::currentRoute($arguments),
         );
     }
 
