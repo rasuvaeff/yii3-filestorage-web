@@ -78,6 +78,13 @@ chase them with tests that assert implementation.
   `FileDownloadRouterDispatchTest` — a real `Router` + FastRoute dispatch, no
   attribute middleware; the unit tests set the sources by hand and cannot see
   the gap.
+- **The `currentRoute` parameter is the LAST constructor parameter, on
+  purpose.** roave compares signatures positionally: inserting a parameter in
+  the middle turns every later one into a `[BC] CHANGED` break. New optional
+  parameters go at the end. And the `->action(Handler::class)` route form
+  needs `yiisoft/middleware-dispatcher` 5.2+ (the floor `require-dev` pins) —
+  5.0 rejects a `RequestHandlerInterface` class name as a middleware
+  definition.
 - **`DATE_RFC7231` is deprecated in PHP 8.5** for ignoring the timezone it is
   given, and this package supports 8.5. The IMF-fixdate format is spelled out
   as `D, d M Y H:i:s \G\M\T` in `FileDownloadAction::HTTP_DATE`. Do not

@@ -67,7 +67,9 @@ and falls back to the route argument of the same name in `yiisoft/router`'s
 `CurrentRoute` — that router never copies its arguments into the request, and
 without the fallback this exact recipe answered 404 to every download. When
 both sources are present the request attribute wins, so a stack that sets
-attributes itself — another router, a copy-middleware — keeps working.
+attributes itself — another router, a copy-middleware — keeps working. (The
+`->action(FileDownloadAction::class)` form needs `yiisoft/middleware-dispatcher`
+5.2+, which every current `yiisoft/router` application resolves.)
 
 That is all the wiring. `Storage::urlFor()` starts returning signed URLs for
 private stores the moment this package is installed, because core declares

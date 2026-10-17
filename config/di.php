@@ -86,9 +86,9 @@ return [
         deliveryPolicies: $deliveryPolicies,
         downloads: $downloads,
         responses: $responses,
-        currentRoute: $currentRoute,
         activeMediaTypes: $activeMediaTypes,
         cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
         tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
+        currentRoute: $currentRoute,
     ),
 ];

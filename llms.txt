@@ -64,10 +64,10 @@ new FileDownloadAction(
     DeliveryPolicyRegistry $deliveryPolicies,
     FileResponseFactory $downloads,
     ResponseFactoryInterface $responses,
-    ?CurrentRoute $currentRoute = null,   // yiisoft/router argument fallback
     ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
     string $cacheControl = 'private, max-age=3600',
     string $tokenAttribute = 'token',
+    ?CurrentRoute $currentRoute = null,
 );
 ```
 

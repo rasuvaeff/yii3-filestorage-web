@@ -61,15 +61,15 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
     private const string HTTP_DATE = 'D, d M Y H:i:s \G\M\T';
 
     /**
+     * @param string $tokenAttribute The name of both sources at once: the
+     *        request attribute a router may set, and the route placeholder —
+     *        `Route::get('/files/{token}')` gives `token`.
      * @param CurrentRoute|null $currentRoute Where `yiisoft/router` keeps the
      *        matched arguments instead of the request: it never copies them
      *        into attributes, so without this fallback a route registered
      *        exactly as the README shows answered 404 to every download. Null
      *        in a stack that is not yiisoft/router — the attribute is then the
      *        only source.
-     * @param string $tokenAttribute The name of both sources at once: the
-     *        request attribute a router may set, and the route placeholder —
-     *        `Route::get('/files/{token}')` gives `token`.
      */
     public function __construct(
         private UrlSignerInterface $signer,
@@ -78,10 +78,10 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         private DeliveryPolicyRegistry $deliveryPolicies,
         private FileResponseFactory $downloads,
         private ResponseFactoryInterface $responses,
-        private ?CurrentRoute $currentRoute = null,
         private ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
         private string $cacheControl = 'private, max-age=3600',
         private string $tokenAttribute = 'token',
+        private ?CurrentRoute $currentRoute = null,
     ) {}
 
     #[Override]
