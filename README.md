@@ -86,6 +86,45 @@ private stores the moment this package is installed, because core declares
 | **The media type is normalized once, before anything reads it** | CR, LF and NUL are stripped before the type is matched against the active list, put in the validator and written to `Content-Type`. Deciding on the raw value and cleaning only at the header is how a stored `text/ht\r\nml` misses the list and still arrives as `text/html`, inline |
 | **A token minted for a variant is not served the original** | The variant is inside the signature so a thumbnail URL cannot be replayed for the full-resolution file |
 
+## Uploading
+
+`Action\FileUploadAction` is the other half — it accepts one uploaded file per
+request and stores it through the facade:
+
+```php
+->routes(
+    Route::post('/avatars')
+        ->action(fn (FileUploadAction $action) => $action)  // group comes from wiring
+)
+```
+
+```php
+// config/common/di/avatars.php
+FileUploadAction::class => static fn (StorageInterface $storage, ...) =>
+    new FileUploadAction($storage, ..., groupName: 'avatars'),
+```
+
+One file per request on purpose: core has no `addMany()` because it cannot be
+atomic, and an action that half-succeeds a multi-upload hands the client a lie
+about what happened. Multi-file intake is several requests.
+
+The statuses are the honest ones:
+
+| Outcome | Status |
+|---|---|
+| Stored | `201` + JSON (`id`, `originalName`, `size`, `mimeType`) |
+| Over the group's size limit, the spool cap, or PHP's own size limits | `413` |
+| A media type the group does not accept | `415` |
+| Anything else the client sent wrong (missing key, multi-upload array, partial upload, other policy violations) | `400` |
+| PHP upload errors no client can fix (missing/unwritable tmp dir) | `500` |
+
+`Validation\FileRule` (+ its handler) does the same checks at form level, for
+consumers using `yiisoft/validator`: the PHP upload verdict, the size limit
+and the client-declared media type. It answers "would the storage group accept
+this" before any byte is read, so the error lands next to the field — the
+authoritative checks still run in `Storage::add()`, because a client's
+`Content-Type` is a hint, not a fact.
+
 ## Serving renditions (variant tokens)
 
 `Derivatives::urlFor()` in `rasuvaeff/yii3-filestorage-images` mints variant

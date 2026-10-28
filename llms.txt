@@ -106,6 +106,36 @@ Stamps the *current* scope into the token at minting time.
 the same, for a named rendition: the variant travels inside the signed payload,
 so a thumbnail token cannot be replayed for the full-resolution file.
 
+### `Action\FileUploadAction`
+
+```php
+new FileUploadAction(
+    StorageInterface $storage,
+    ResponseFactoryInterface $responses,
+    StreamFactoryInterface $streams,
+    string $groupName = 'common',  // the action's configuration, never the client's
+    string $filesKey = 'file',
+);
+```
+
+Accepts ONE uploaded file per request (no `addMany()` exists — atomicity);
+stores via `Storage::add()`. 201 + JSON (`id`, `originalName`, `size`,
+`mimeType`). 413: `UploadSizeException`/`UploadTooLargeException`/
+`ContentTooLargeException`/PHP size errors. 415:
+`UnsupportedMediaTypeException`. 400: other `PolicyViolationException`, bad
+request shape. 500: `UPLOAD_ERR_NO_TMP_DIR`/`UPLOAD_ERR_CANT_WRITE`.
+
+### `Validation\FileRule` / `FileRuleHandler` (yiisoft/validator)
+
+```php
+new FileRule(allowedMimeTypes: ['image/png'], maxBytes: 4_194_304)
+```
+
+Form-level: PHP upload verdict, size limit, client-declared media type
+(hint — authoritative detection stays in `Storage::add()`). Messages:
+`incorrectInputMessage`, `tooLargeMessage`, `wrongTypeMessage`,
+`uploadErrorMessage`; parameters carry `property`/`type`/`code`.
+
 ### Variant tokens
 
 With `rasuvaeff/yii3-filestorage-images` installed, `FileDownloadAction` serves
