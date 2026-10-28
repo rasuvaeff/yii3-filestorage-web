@@ -220,7 +220,13 @@ final class FileDownloadActionTest
                 'poster' => ['extension' => 'webp', 'mediaType' => 'image/webp'],
                 'wide' => ['extension' => 'avif', 'mediaType' => 'image/avif'],
             ],
-            bodies: ['file-1/thumb' => 'x', 'file-1/poster' => 'x', 'file-2/thumb' => 'x'],
+            bodies: [
+                'file-1/thumb' => 'x',
+                'file-1/poster' => 'x',
+                'file-1/wide' => 'x',
+                'file-2/thumb' => 'x',
+                'file-3/thumb' => 'x',
+            ],
         );
         $action = $this->variantAction($resolver);
 
@@ -228,21 +234,32 @@ final class FileDownloadActionTest
             ->handle(Fixtures::request($token))
             ->getHeaderLine('ETag');
 
+        // No comparison below may be satisfied by an empty header (a 404
+        // carries no ETag) — each side must be a real validator first.
+        $thumb = $etagOf($this->variantTokenFor('thumb'));
+        $poster = $etagOf($this->variantTokenFor('poster'));
+        $wide = $etagOf($this->variantTokenFor('wide'));
+        Assert::true($thumb !== '' && $poster !== '' && $wide !== '');
+
         // The rendition name alone: same extension, same media type — only
         // `thumb.webp` vs `poster.webp` separates the two, and only the
         // physical name (which carries the preset version) must move the
         // validator, or a cache serves a stale version after a preset bump.
-        Assert::true($etagOf($this->variantTokenFor('thumb')) !== $etagOf($this->variantTokenFor('poster')));
+        Assert::true($thumb !== $poster);
 
         // And the media type alone (name differs here too, but the point is
         // the type never rides hidden inside the name).
-        Assert::true($etagOf($this->variantTokenFor('thumb')) !== $etagOf($this->variantTokenFor('wide')));
+        Assert::true($thumb !== $wide);
 
         $this->files->add(Fixtures::file('file-2'));
-        Assert::true($etagOf($this->variantTokenFor('thumb', 'file-1')) !== $etagOf($this->variantTokenFor('thumb', 'file-2')));
+        $otherFile = $etagOf($this->variantTokenFor('thumb', 'file-2'));
+        Assert::true($otherFile !== '');
+        Assert::true($thumb !== $otherFile);
 
         $this->files->add(Fixtures::file('file-3', updatedAt: Fixtures::now()->modify('+5 minutes')));
-        Assert::true($etagOf($this->variantTokenFor('thumb', 'file-1')) !== $etagOf($this->variantTokenFor('thumb', 'file-3')));
+        $otherUpdate = $etagOf($this->variantTokenFor('thumb', 'file-3'));
+        Assert::true($otherUpdate !== '');
+        Assert::true($thumb !== $otherUpdate);
     }
 
     /**
