@@ -26,7 +26,7 @@
         "psr/http-factory": "^1.0",
         "psr/http-message": "^2.0",
         "psr/http-server-handler": "^1.0",
-        "rasuvaeff/yii3-filestorage": "^0.1",
+        "rasuvaeff/yii3-filestorage": "^0.2",
         "yiisoft/http": "^1.2"
     },
     "require-dev": {

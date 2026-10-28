@@ -62,10 +62,31 @@ final readonly class HmacProxyUrlGenerator implements ProxyUrlGeneratorInterface
     #[Override]
     public function url(File $file, DateTimeImmutable $expiresAt): string
     {
-        $token = $this->signer->sign(
+        return $this->buildUrl(
             payload: new SignedPayload(fileId: $file->id, scopeId: $this->scopes?->currentScopeId()),
             expiresAt: $expiresAt,
         );
+    }
+
+    #[Override]
+    public function variantUrl(File $file, string $variant, DateTimeImmutable $expiresAt): string
+    {
+        return $this->buildUrl(
+            payload: new SignedPayload(
+                fileId: $file->id,
+                variant: $variant,
+                scopeId: $this->scopes?->currentScopeId(),
+            ),
+            expiresAt: $expiresAt,
+        );
+    }
+
+    /**
+     * @return non-empty-string
+     */
+    private function buildUrl(SignedPayload $payload, DateTimeImmutable $expiresAt): string
+    {
+        $token = $this->signer->sign(payload: $payload, expiresAt: $expiresAt);
 
         // The token is base64url plus dots by construction, so nothing here
         // needs escaping — but going through rawurlencode() anyway would break

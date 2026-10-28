@@ -22,6 +22,7 @@ use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\InMemoryResolver;
+use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\MemoryDerivativeResolver;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\UntrimmedRequest;
 use Testo\Assert;
 use Testo\Codecov\Covers;
@@ -85,6 +86,223 @@ final class FileDownloadActionTest
 
         Assert::string($disposition)->contains('filename="report notes.txt"');
         Assert::string($disposition)->contains("filename*=utf-8''report%20notes.txt");
+    }
+
+    /**
+     * The rendition, not the original: its bytes, its authoritative media
+     * type, and the original's name wearing the rendition's extension — the
+     * exact shape `DeliveryOptions::forVariant()` computes.
+     */
+    public function servesARenditionForAVariantToken(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+            bodies: ['file-1/thumb' => 'thumbnail bytes'],
+        ));
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::same((string) $response->getBody(), 'thumbnail bytes');
+        Assert::same($response->getHeaderLine('Content-Type'), 'image/webp');
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('filename="report notes.webp"');
+        Assert::same($response->getHeaderLine('X-Content-Type-Options'), 'nosniff');
+        Assert::same($response->getHeaderLine('Cache-Control'), 'private, max-age=3600');
+    }
+
+    /**
+     * Without the images package there is nothing that produces a rendition —
+     * and serving the original instead is forbidden: the variant is inside
+     * the signature precisely so it cannot be swapped.
+     */
+    public function aVariantTokenWithoutAResolverAnswersNotFound(): void
+    {
+        $response = $this->action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::same($response->getStatusCode(), 404);
+    }
+
+    /**
+     * A preset this installation does not configure is one more unresolvable
+     * token.
+     */
+    public function anUnknownPresetAnswersNotFound(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+        ));
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('poster')));
+
+        Assert::same($response->getStatusCode(), 404);
+    }
+
+    /**
+     * The resolver failed to render — the outer boundary already maps every
+     * exception to the same 404, and a rendition is no exception to that rule.
+     */
+    public function aGenerationFailureLooksLikeAnyOtherUnresolvableToken(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+            streamFailure: new StoreException('renderer exploded'),
+        ));
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::same($response->getStatusCode(), 404);
+    }
+
+    /**
+     * A permissive group serves a non-active rendition inline — same decision
+     * an original would get, taken from the rendition's own type.
+     */
+    public function aVariantMayBeServedInline(): void
+    {
+        $factory = Fixtures::factory();
+        $action = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+            downloads: new FileResponseFactory($factory, $factory),
+            responses: $factory,
+            derivatives: new MemoryDerivativeResolver(
+                presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+                bodies: ['file-1/thumb' => 'thumbnail bytes'],
+            ),
+        );
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('inline');
+        Assert::same($response->getHeaderLine('Content-Type'), 'image/webp');
+    }
+
+    /**
+     * An active type is never inline, variant or not — the rule is uniform,
+     * and the rendition's type is the one the decision reads.
+     */
+    public function anActiveTypeIsNeverInlineForAVariant(): void
+    {
+        $factory = Fixtures::factory();
+        $action = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+            downloads: new FileResponseFactory($factory, $factory),
+            responses: $factory,
+            activeMediaTypes: new ActiveMediaTypes(['image/webp']),
+            derivatives: new MemoryDerivativeResolver(
+                presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+                bodies: ['file-1/thumb' => 'thumbnail bytes'],
+            ),
+        );
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
+        Assert::false((bool) str_contains($response->getHeaderLine('Content-Disposition'), 'inline'));
+    }
+
+    /**
+     * Every input of the rendition's identity moves the ETag: a different
+     * preset, a different file, a different update — each yields a different
+     * validator, because the source string carries them all.
+     */
+    public function aVariantEtagTracksEveryPartOfItsIdentity(): void
+    {
+        $resolver = new MemoryDerivativeResolver(
+            presets: [
+                'thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp'],
+                'poster' => ['extension' => 'webp', 'mediaType' => 'image/webp'],
+                'wide' => ['extension' => 'avif', 'mediaType' => 'image/avif'],
+            ],
+            bodies: [
+                'file-1/thumb' => 'x',
+                'file-1/poster' => 'x',
+                'file-1/wide' => 'x',
+                'file-2/thumb' => 'x',
+                'file-3/thumb' => 'x',
+            ],
+        );
+        $action = $this->variantAction($resolver);
+
+        $etagOf = static fn(string $token): string => $action
+            ->handle(Fixtures::request($token))
+            ->getHeaderLine('ETag');
+
+        // No comparison below may be satisfied by an empty header (a 404
+        // carries no ETag) — each side must be a real validator first.
+        $thumb = $etagOf($this->variantTokenFor('thumb'));
+        $poster = $etagOf($this->variantTokenFor('poster'));
+        $wide = $etagOf($this->variantTokenFor('wide'));
+        Assert::true($thumb !== '' && $poster !== '' && $wide !== '');
+
+        // The rendition name alone: same extension, same media type — only
+        // `thumb.webp` vs `poster.webp` separates the two, and only the
+        // physical name (which carries the preset version) must move the
+        // validator, or a cache serves a stale version after a preset bump.
+        Assert::true($thumb !== $poster);
+
+        // And the media type alone (name differs here too, but the point is
+        // the type never rides hidden inside the name).
+        Assert::true($thumb !== $wide);
+
+        $this->files->add(Fixtures::file('file-2'));
+        $otherFile = $etagOf($this->variantTokenFor('thumb', 'file-2'));
+        Assert::true($otherFile !== '');
+        Assert::true($thumb !== $otherFile);
+
+        $this->files->add(Fixtures::file('file-3', updatedAt: Fixtures::now()->modify('+5 minutes')));
+        $otherUpdate = $etagOf($this->variantTokenFor('thumb', 'file-3'));
+        Assert::true($otherUpdate !== '');
+        Assert::true($thumb !== $otherUpdate);
+    }
+
+    /**
+     * An ETag is a quoted string in HTTP, and the rendition's is weak by
+     * construction — the grammar itself, asserted on the actual header, so a
+     * validator emitted unquoted or unmarked is a failure, not a curiosity.
+     */
+    public function aVariantEtagIsAQuotedWeakValidator(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+            bodies: ['file-1/thumb' => 'x'],
+        ));
+
+        $etag = $action->handle(Fixtures::request($this->variantTokenFor('thumb')))->getHeaderLine('ETag');
+
+        Assert::true((bool) preg_match('/\AW\/"[0-9a-f]{32}"\z/', $etag), "weak quoted validator expected, got {$etag}");
+    }
+
+    /**
+     * The rendition's validator is its own: not the original's ETag (which
+     * would let a browser reuse a cached original for the thumbnail), and
+     * stable enough that a second conditional request gets a 304.
+     */
+    public function aVariantValidatesIndependentlyOfTheOriginal(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+            bodies: ['file-1/thumb' => 'thumbnail bytes'],
+        ));
+
+        $original = $this->action->handle(Fixtures::request($this->tokenFor('file-1')));
+        $variant = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::true($variant->getHeaderLine('ETag') !== '');
+        Assert::true($variant->getHeaderLine('ETag') !== $original->getHeaderLine('ETag'));
+
+        $notModified = $action->handle(Fixtures::request(
+            $this->variantTokenFor('thumb'),
+            headers: ['If-None-Match' => $variant->getHeaderLine('ETag')],
+        ));
+
+        Assert::same($notModified->getStatusCode(), 304);
     }
 
     /**
@@ -839,6 +1057,39 @@ final class FileDownloadActionTest
             deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy]),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
+        );
+    }
+
+    /**
+     * The default action with a derivative resolver bound — the wiring an
+     * application with `rasuvaeff/yii3-filestorage-images` installed gets.
+     */
+    private function variantAction(MemoryDerivativeResolver $resolver): FileDownloadAction
+    {
+        $factory = Fixtures::factory();
+
+        return new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: new DeliveryPolicyRegistry(),
+            downloads: new FileResponseFactory($factory, $factory),
+            responses: $factory,
+            derivatives: $resolver,
+        );
+    }
+
+    /**
+     * The token `HmacProxyUrlGenerator::variantUrl()` would mint for a
+     * rendition of a file.
+     */
+    private function variantTokenFor(string $variant, string $id = 'file-1'): string
+    {
+        $this->tokenFor($id);
+
+        return Fixtures::signer()->sign(
+            new SignedPayload(fileId: $id, variant: $variant),
+            Fixtures::now()->modify('+1 hour'),
         );
     }
 

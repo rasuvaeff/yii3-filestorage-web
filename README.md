@@ -86,6 +86,32 @@ private stores the moment this package is installed, because core declares
 | **The media type is normalized once, before anything reads it** | CR, LF and NUL are stripped before the type is matched against the active list, put in the validator and written to `Content-Type`. Deciding on the raw value and cleaning only at the header is how a stored `text/ht\r\nml` misses the list and still arrives as `text/html`, inline |
 | **A token minted for a variant is not served the original** | The variant is inside the signature so a thumbnail URL cannot be replayed for the full-resolution file |
 
+## Serving renditions (variant tokens)
+
+`Derivatives::urlFor()` in `rasuvaeff/yii3-filestorage-images` mints variant
+tokens for the same private-store reason the core mints original ones. This
+package serves them: install `-images` and the core's
+`DerivativeResolverInterface` contract gets an implementation (`Derivatives`
+itself), which the action picks up as an optional dependency — the wiring needs
+nothing beyond installing both packages.
+
+A variant token is resolved like any other: the file is looked up in the
+token's scope, the resolver generates the rendition on first request (lazy —
+the first client pays the generation, every later one is a read) and the
+response is built from the rendition's own authoritative media type and
+extension — a WebP thumbnail of `photo.jpg` downloads as `photo.webp`.
+Conditional requests work against a validator of the rendition's own: the
+original's `(id, updatedAt)`, the physical rendition name (so bumping a preset
+version invalidates caches), the delivery decision and the type. Ranges: a
+rendition stream has no store range primitive, so ranges are served from the
+body when it is seekable — a locally generated rendition is — and not
+advertised otherwise.
+
+What cannot resolve stays a 404, the same as everything else: no resolver
+bound (the `-images` package is absent), an unknown preset, missing bytes, a
+generation failure. And the original is never substituted for a variant — the
+variant is inside the signature precisely so it cannot be.
+
 ## Ranges
 
 Advertised and served when the range can actually be cheap, which is a question
