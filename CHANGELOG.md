@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Variant tokens are served: `FileDownloadAction` takes the core's
+  `DerivativeResolverInterface` as an optional last constructor parameter
+  (bound by installing `rasuvaeff/yii3-filestorage-images`) and resolves a
+  rendition with its authoritative media type and extension. #9
+- `Url\HmacProxyUrlGenerator::variantUrl()`: the signed proxy URL for a
+  rendition — the variant is inside the payload's HMAC. #9
+- `Http\FileResponseFactory::create()` accepts a nullable store: a rendition
+  stream has no store range primitive, so ranges come from the body when it is
+  seekable. #9
+
 ## 0.2.0 — 2026-10-17
 
 - `FileDownloadAction` reads the download token from `yiisoft/router`'s

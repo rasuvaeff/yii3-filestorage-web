@@ -45,12 +45,17 @@ final readonly class FileResponseFactory
     ) {}
 
     /**
+     * @param StoreInterface|null $store The store the body came from, for the
+     *        range-capability question. Null when there is no store to ask —
+     *        a derivative rendition: the body alone decides, so a seekable
+     *        rendition stream is windowed and a forward-only one is served as
+     *        a full `200`.
      * @param string|null $rangeHeader The request's `Range`, when it had one
      *        and any `If-Range` precondition passed.
      */
     public function create(
         File $file,
-        StoreInterface $store,
+        ?StoreInterface $store,
         StreamInterface $stream,
         DeliveryOptions $options,
         bool $inline,

@@ -17,6 +17,8 @@ use Rasuvaeff\Yii3Filestorage\File;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryOptions;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
+use Rasuvaeff\Yii3Filestorage\Store\DerivativeDescriptor;
+use Rasuvaeff\Yii3Filestorage\Store\DerivativeResolverInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
 use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
@@ -70,6 +72,13 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      *        exactly as the README shows answered 404 to every download. Null
      *        in a stack that is not yiisoft/router — the attribute is then the
      *        only source.
+     * @param DerivativeResolverInterface|null $derivatives Produces the
+     *        rendition a variant token asks for — bound by installing
+     *        `rasuvaeff/yii3-filestorage-images` (its `Derivatives` facade
+     *        implements the contract). Null when that package is absent, and
+     *        a variant token is then one more thing this action does not
+     *        resolve: a 404, never the original — the variant is inside the
+     *        signature precisely so it cannot be quietly swapped.
      */
     public function __construct(
         private UrlSignerInterface $signer,
@@ -82,6 +91,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         private string $cacheControl = 'private, max-age=3600',
         private string $tokenAttribute = 'token',
         private ?CurrentRoute $currentRoute = null,
+        private ?DerivativeResolverInterface $derivatives = null,
     ) {}
 
     #[Override]
@@ -123,11 +133,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
                 // the request wins.
                 : $this->currentRoute?->getArgument($this->tokenAttribute);
         $payload = \is_string($token) ? $this->signer->verify($token) : null;
-
-        // A variant is a rendition the images package produces. Until it
-        // exists, a token asking for one must not quietly get the original —
-        // the variant is inside the signature precisely so it cannot.
-        if (!$payload instanceof SignedPayload || $payload->variant !== null) {
+        if (!$payload instanceof SignedPayload) {
             return $this->notFound();
         }
 
@@ -136,6 +142,16 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
             return $this->notFound();
         }
 
+        // A variant is a rendition the images package produces. Serving the
+        // original instead is not an option: the variant is inside the
+        // signature precisely so it cannot be swapped for one.
+        return $payload->variant === null
+            ? $this->serveOriginal($request, $file)
+            : $this->serveVariant($request, $file, $payload->variant);
+    }
+
+    private function serveOriginal(ServerRequestInterface $request, File $file): ResponseInterface
+    {
         // The delivery decision is made *before* the validator, because the
         // validator has to depend on it. Bytes alone are not what a cache
         // stores: it stores the response, disposition included.
@@ -177,6 +193,58 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
     }
 
     /**
+     * The rendition a variant token names, served with the same machinery as
+     * the original: conditional GET, headers from the group's delivery policy,
+     * the rendition's own authoritative media type.
+     *
+     * A resolver that cannot produce it — the package is not installed, the
+     * preset is not configured, the original's bytes are gone, generation
+     * failed — is one more unresolvable token, and answers 404 like every
+     * other one.
+     *
+     * @param non-empty-string $variant
+     */
+    private function serveVariant(ServerRequestInterface $request, File $file, string $variant): ResponseInterface
+    {
+        if ($this->derivatives === null) {
+            return $this->notFound();
+        }
+
+        // Unknown preset — or a rendition the installation cannot produce —
+        // surfaces from the resolver as a FilestorageException, which handle()
+        // already maps to 404.
+        $descriptor = $this->derivatives->descriptor($variant);
+        $stream = $this->derivatives->stream($file, $variant);
+        if (!$stream instanceof StreamInterface) {
+            return $this->notFound();
+        }
+
+        $options = DeliveryOptions::forVariant(
+            $file,
+            $this->deliveryPolicies->for($file->groupName),
+            $descriptor,
+        );
+        $mediaType = MediaType::headerSafe($options->responseMediaType);
+        $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($mediaType);
+
+        $etag = $this->variantEtag($file, $descriptor, $mediaType, $inline);
+        if ($this->isCurrent($request, $etag, $file->updatedAt)) {
+            return $this->validators($this->responses->createResponse(Status::NOT_MODIFIED), $etag, $file);
+        }
+
+        $response = $this->downloads->create(
+            file: $file,
+            store: null,
+            stream: $stream,
+            options: $options,
+            inline: $inline,
+            rangeHeader: $this->rangeHeader($request, $etag, $file->updatedAt),
+        );
+
+        return $this->validators($response, $etag, $file)->withHeader(Header::X_CONTENT_TYPE_OPTIONS, 'nosniff');
+    }
+
+    /**
      * A validator that changes whenever the bytes could have.
      *
      * The content hash is the honest answer when there is one. Without it the
@@ -202,7 +270,6 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
     {
         $strong = $file->contentHash !== null;
         $source = $file->contentHash ?? ($file->id . '|' . $file->size . '|' . $file->updatedAt->format('U.u'));
-        $source .= '|' . ($inline ? 'inline' : 'attachment') . '|' . $mediaType;
 
         // Marked weak when it is weak. The fallback triple does not prove two
         // responses are byte-identical — an in-place rewrite that preserves
@@ -210,7 +277,45 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         // for If-None-Match but not for If-Range. Emitting it unmarked claimed
         // a strength it does not have, and a resuming client would then splice
         // an old prefix onto a new suffix.
-        return ($strong ? '' : 'W/') . '"' . hash('xxh128', $source) . '"';
+        return ($strong ? '' : 'W/') . '"' . hash('xxh128', $this->validatorSource(
+            $source,
+            $inline ? 'inline' : 'attachment',
+            $mediaType,
+        )) . '"';
+    }
+
+    /**
+     * A rendition's validator is always weak: nothing hashes the derivative's
+     * bytes, so equality is never provable. Its identity is the original's
+     * (id, updatedAt), the physical rendition name — which carries the preset
+     * version, so bumping one invalidates caches — and the delivery decision,
+     * for the same stored-`inline` reason as the original's.
+     *
+     * @param non-empty-string $mediaType
+     *
+     * @return non-empty-string
+     */
+    private function variantEtag(File $file, DerivativeDescriptor $derivative, string $mediaType, bool $inline): string
+    {
+        return 'W/"' . hash('xxh128', $this->validatorSource(
+            $file->id,
+            $file->updatedAt->format('U.u'),
+            $derivative->fileName(),
+            $inline ? 'inline' : 'attachment',
+            $mediaType,
+        )) . '"';
+    }
+
+    /**
+     * The separators are load-bearing: they are what make the concatenation
+     * unambiguous, so a validator built from parts cannot silently alias two
+     * different identities (`a` + `1x` vs `a1` + `x`).
+     *
+     * @param string ...$parts
+     */
+    private function validatorSource(string ...$parts): string
+    {
+        return implode('|', $parts);
     }
 
     private function isCurrent(ServerRequestInterface $request, string $etag, DateTimeImmutable $updatedAt): bool

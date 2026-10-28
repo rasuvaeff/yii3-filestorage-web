@@ -64,6 +64,40 @@ final class HmacProxyUrlGeneratorTest
     }
 
     /**
+     * A rendition URL carries the variant inside the signature, the same way
+     * presigned store URLs carry their constraints: a thumbnail token cannot
+     * be replayed as the full-resolution file.
+     */
+    public function variantUrlSignsTheVariantIntoThePayload(): void
+    {
+        $generator = new HmacProxyUrlGenerator(Fixtures::signer());
+
+        $url = $generator->variantUrl(Fixtures::file(), 'thumb', Fixtures::now()->modify('+1 hour'));
+
+        $payload = Fixtures::signer()->verify(substr($url, strlen('/files/')));
+
+        Assert::same($payload?->fileId, 'file-1');
+        Assert::same($payload?->variant, 'thumb');
+        Assert::null($payload?->scopeId);
+    }
+
+    /**
+     * The scope stamps in for a rendition token exactly as for an original —
+     * a minted thumbnail URL is for the tenant that asked.
+     */
+    public function variantUrlCarriesTheCurrentScope(): void
+    {
+        $generator = new HmacProxyUrlGenerator(Fixtures::signer(), scopes: new FixedScope('tenant-a'));
+
+        $payload = Fixtures::signer()->verify(
+            substr($generator->variantUrl(Fixtures::file(), 'thumb', Fixtures::now()->modify('+1 hour')), strlen('/files/')),
+        );
+
+        Assert::same($payload?->scopeId, 'tenant-a');
+        Assert::same($payload?->variant, 'thumb');
+    }
+
+    /**
      * A route with no placeholder produces the same URL for every file — one
      * that resolves to whatever the router does with it, which is not a
      * download. Better to refuse at wiring time than to serve it.

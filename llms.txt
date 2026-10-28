@@ -102,12 +102,25 @@ new HmacProxyUrlGenerator(
 
 Stamps the *current* scope into the token at minting time.
 
+`variantUrl(File $file, string $variant, DateTimeImmutable $expiresAt): string` —
+the same, for a named rendition: the variant travels inside the signed payload,
+so a thumbnail token cannot be replayed for the full-resolution file.
+
+### Variant tokens
+
+With `rasuvaeff/yii3-filestorage-images` installed, `FileDownloadAction` serves
+variant tokens through the core `DerivativeResolverInterface` (optional last
+constructor parameter). Unconfigured preset, missing resolver, generation
+failure — all 404. The rendition is served with its own authoritative media
+type and `original-name.variant-extension`; its ETag is always weak and covers
+`(id, updatedAt, rendition name, disposition, type)`.
+
 ### `Http\FileResponseFactory`
 
 ```php
 $factory->create(
     File $file,
-    StoreInterface $store,
+    ?StoreInterface $store,   // null: no store to ask — a rendition; ranges come from the body when seekable
     StreamInterface $stream,
     DeliveryOptions $options,
     bool $inline,
