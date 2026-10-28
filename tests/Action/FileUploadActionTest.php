@@ -42,7 +42,7 @@ final class FileUploadActionTest
         // test, not slip through a whole-object comparison.
         Assert::json((string) $response->getBody())
             ->isObject()
-            ->hasKeys('id', 'originalName', 'size', 'mimeType')
+            ->hasKeys(['id', 'originalName', 'size', 'mimeType'])
             ->assertPath('$.id', fn(mixed $id): bool => $id === 'file-1')
             ->assertPath('$.originalName', fn(mixed $n): bool => $n === 'report.txt')
             ->assertPath('$.size', fn(mixed $s): bool => $s === 11)
@@ -90,7 +90,7 @@ final class FileUploadActionTest
         $response = $this->action()->handle(new ServerRequest('POST', '/upload'));
 
         Assert::same($response->getStatusCode(), 400);
-        Assert::json((string) $response->getBody())->isObject()->hasKeys('error');
+        Assert::json((string) $response->getBody())->isObject()->hasKeys(['error']);
     }
 
     /** A nested array is a multi-upload; this action refuses rather than half-processes. */
