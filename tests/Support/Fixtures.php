@@ -55,13 +55,14 @@ final class Fixtures
         ?DateTimeImmutable $updatedAt = null,
         string $storeName = 'memory',
         ?DateTimeImmutable $createdAt = null,
+        string $originalName = 'report notes.txt',
     ): File {
         return File::create(
             id: $id,
             storeName: $storeName,
             groupName: 'common',
             relativePath: 'common/ab/cd/key/original.txt',
-            originalName: 'report notes.txt',
+            originalName: $originalName,
             size: $size,
             createdAt: $createdAt ?? self::now(),
             mimeType: $mimeType,
