@@ -22,6 +22,7 @@ use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Data\DataProvider;
+use Testo\Expect;
 use Testo\Test;
 
 use function Rasuvaeff\Understudy\when;
@@ -207,6 +208,31 @@ final class FileUploadActionTest
         $response = $action->handle($this->request($this->upload('x')));
 
         Assert::same($response->getStatusCode(), 400);
+    }
+
+    #[DataProvider('emptyNameProvider')]
+    public function anEmptyGroupNameOrFilesKeyIsRefused(string $groupName, string $filesKey, string $message): void
+    {
+        $factory = new Psr17Factory();
+
+        Expect::exception(\InvalidArgumentException::class)->withMessageContaining($message);
+
+        new FileUploadAction(
+            storage: Understudy::for(StorageInterface::class),
+            responses: $factory,
+            streams: $factory,
+            groupName: $groupName,
+            filesKey: $filesKey,
+        );
+    }
+
+    /**
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function emptyNameProvider(): iterable
+    {
+        yield 'group name' => ['', 'file', 'Group name must not be empty'];
+        yield 'files key' => ['avatars', '', 'Files key must not be empty'];
     }
 
     private function action(?\RuntimeException $failingWith = null): FileUploadAction

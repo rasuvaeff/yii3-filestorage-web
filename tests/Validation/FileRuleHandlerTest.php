@@ -12,7 +12,10 @@ use Rasuvaeff\Yii3FilestorageWeb\Validation\FileRuleHandler;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Data\DataProvider;
+use Testo\Expect;
 use Testo\Test;
+use Yiisoft\Validator\Exception\UnexpectedRuleException;
+use Yiisoft\Validator\Rule\Required;
 use Yiisoft\Validator\ValidationContext;
 
 #[Test]
@@ -128,6 +131,22 @@ final class FileRuleHandlerTest
         Assert::true(
             $this->handler()->validate($this->upload('x', clientType: 'application/x-any'), $rule, $this->context())->isValid(),
         );
+    }
+
+    public function aClientTypeOnTheWhitelistIsAccepted(): void
+    {
+        $rule = new FileRule(allowedMimeTypes: ['image/png', 'text/plain']);
+
+        Assert::true(
+            $this->handler()->validate($this->upload('x', clientType: 'text/plain'), $rule, $this->context())->isValid(),
+        );
+    }
+
+    public function aRuleOfAnotherKindIsAProgrammingError(): void
+    {
+        Expect::exception(UnexpectedRuleException::class);
+
+        $this->handler()->validate($this->upload('x'), new Required(), $this->context());
     }
 
     private function handler(): FileRuleHandler

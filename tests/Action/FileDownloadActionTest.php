@@ -1046,6 +1046,29 @@ final class FileDownloadActionTest
         );
     }
 
+    /**
+     * The resolver knows the preset but has no bytes for this file: one more
+     * unresolvable token.
+     */
+    public function aRenditionTheResolverHasNoBytesForAnswersNotFound(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+        ));
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
+
+        Assert::same($response->getStatusCode(), 404);
+    }
+
+    public function aRangeWithoutIfRangeIsServedAsPartialContent(): void
+    {
+        $response = $this->action->handle(Fixtures::request($this->tokenFor('file-1'), ['Range' => 'bytes=0-4']));
+
+        Assert::same($response->getStatusCode(), 206);
+        Assert::same((string) $response->getBody(), 'hello');
+    }
+
     private function actionWithPolicy(DeliveryPolicy $policy): FileDownloadAction
     {
         $factory = Fixtures::factory();
