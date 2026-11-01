@@ -51,8 +51,10 @@ make release-check
 
 ## Mutation testing
 
-`minMsi` is **93, and no mutator is ignored** — 210 of 225 mutants killed. The
-15 survivors are five groups, and every one of them is an equivalent mutant:
+`minMsi` is **93, and no mutator is ignored by name** — 293 of 311 counted mutants
+killed (`--with-uncovered`, 6 more are ignored signature-default lines, 2 are
+`\assert()` calls that are not compiled in CI). The 16 survivors are five groups,
+and every one of them is an equivalent mutant:
 there is no input for which the mutated program answers differently. Do not
 chase them with tests that assert implementation.
 

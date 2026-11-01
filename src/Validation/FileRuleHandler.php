@@ -14,6 +14,8 @@ use Yiisoft\Validator\ValidationContext;
 
 /**
  * A handler for {@see FileRule}.
+ *
+ * @api
  */
 final class FileRuleHandler implements RuleHandlerInterface
 {
