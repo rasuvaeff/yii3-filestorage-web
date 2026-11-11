@@ -53,9 +53,8 @@ final readonly class HmacProxyUrlGenerator implements ProxyUrlGeneratorInterface
             );
         }
 
-        // `str_contains` above guarantees this, but the property carries the
-        // narrow type so `url()` can promise a non-empty result.
-        \assert($route !== '');
+        // The early return above guarantees a non-empty route, so `url()`
+        // can promise a non-empty result.
         $this->route = $route;
     }
 
