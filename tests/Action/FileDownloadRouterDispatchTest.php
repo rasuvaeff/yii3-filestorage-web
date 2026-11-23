@@ -48,9 +48,9 @@ final class FileDownloadRouterDispatchTest
 {
     public function theReadmeRecipeServesTheFile(): void
     {
-        $token = self::tokenFor('file-1');
+        $token = $this->tokenFor('file-1');
 
-        $response = $this->router()->process(new ServerRequest('GET', '/files/' . $token), self::unmatched());
+        $response = $this->router()->process(new ServerRequest('GET', '/files/' . $token), $this->unmatched());
 
         Assert::same($response->getStatusCode(), 200);
         Assert::same((string) $response->getBody(), 'hello world');
@@ -62,7 +62,7 @@ final class FileDownloadRouterDispatchTest
      */
     public function theReadmeRecipeRefusesATamperedToken(): void
     {
-        $response = $this->router()->process(new ServerRequest('GET', '/files/v1.k1.tampered'), self::unmatched());
+        $response = $this->router()->process(new ServerRequest('GET', '/files/v1.k1.tampered'), $this->unmatched());
 
         Assert::same($response->getStatusCode(), 404);
         Assert::same($response->getHeaderLine('Cache-Control'), 'no-store');
@@ -74,7 +74,7 @@ final class FileDownloadRouterDispatchTest
      */
     public function anUnmatchedPathReachesTheHostHandler(): void
     {
-        $response = $this->router()->process(new ServerRequest('GET', '/elsewhere'), self::unmatched());
+        $response = $this->router()->process(new ServerRequest('GET', '/elsewhere'), $this->unmatched());
 
         Assert::same($response->getStatusCode(), 418);
     }
@@ -123,7 +123,7 @@ final class FileDownloadRouterDispatchTest
         );
     }
 
-    private static function tokenFor(string $id): string
+    private function tokenFor(string $id): string
     {
         return Fixtures::signer()->sign(
             new SignedPayload(fileId: $id),
@@ -131,7 +131,7 @@ final class FileDownloadRouterDispatchTest
         );
     }
 
-    private static function unmatched(): RequestHandlerInterface
+    private function unmatched(): RequestHandlerInterface
     {
         return new class implements RequestHandlerInterface {
             #[\Override]
