@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.4.1 — 2026-11-23
+
+- Require `yiisoft/validator` ^2.6.2 for the fix to [GHSA-c4w6-v59v-38v5](https://github.com/yiisoft/validator/security/advisories/GHSA-c4w6-v59v-38v5).
 
 - Mutation testing now counts uncovered code (`--with-uncovered`, template mutator settings): overall MSI 91% before, 94.2% after, against `minMsi` 93. Added tests for `FileRule::getOptions()`, `FileRuleHandler` (whitelisted type accepted, foreign rule refused), `FileUploadAction` empty group/key refusals, a rendition without bytes answering 404, and a `Range` request without `If-Range`. The only src change is the missing `@api` tag on `FileRule` and `FileRuleHandler` (docblock only).
 

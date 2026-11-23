@@ -28,7 +28,7 @@
         "psr/http-server-handler": "^1.0",
         "rasuvaeff/yii3-filestorage": "^0.3",
         "yiisoft/http": "^1.2",
-        "yiisoft/validator": "^2.1"
+        "yiisoft/validator": "^2.6.2"
     },
     "require-dev": {
         "ergebnis/composer-normalize": "^2.51",
