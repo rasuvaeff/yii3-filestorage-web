@@ -44,7 +44,6 @@ final class FileRule implements DumpedRuleInterface, SkipOnEmptyInterface, SkipO
      *        storage group's policy decides.
      * @param int $maxBytes Over this, the upload is refused before its bytes
      *        are read. Zero means no rule-level limit.
-     * @param bool|callable|null $skipOnEmpty
      * @param string $incorrectInputMessage Error message for a value that is
      *        not an uploaded file at all.
      * @param string $tooLargeMessage Error message for the sizes — PHP's own

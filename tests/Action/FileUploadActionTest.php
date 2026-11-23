@@ -67,7 +67,7 @@ final class FileUploadActionTest
         $body = (string) $action->handle($this->request($this->upload('x')))->getBody();
 
         Assert::string($body)->contains('dir/name.txt');
-        Assert::false((bool) str_contains($body, '\\/'));
+        Assert::false(str_contains($body, '\\/'));
     }
 
     /** The group is the action's configuration, not the client's choice. */
@@ -240,7 +240,7 @@ final class FileUploadActionTest
         $factory = new Psr17Factory();
         $storage = Understudy::for(StorageInterface::class);
 
-        if ($failingWith !== null) {
+        if ($failingWith instanceof \RuntimeException) {
             when(static fn(): File => $storage->add(Arg::any(), Arg::any()))->throws($failingWith);
         } else {
             when(static fn(): File => $storage->add(Arg::any(), Arg::any()))->answers(

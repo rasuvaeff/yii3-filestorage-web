@@ -206,7 +206,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      */
     private function serveVariant(ServerRequestInterface $request, File $file, string $variant): ResponseInterface
     {
-        if ($this->derivatives === null) {
+        if (!$this->derivatives instanceof \Rasuvaeff\Yii3Filestorage\Store\DerivativeResolverInterface) {
             return $this->notFound();
         }
 
@@ -310,8 +310,6 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      * The separators are load-bearing: they are what make the concatenation
      * unambiguous, so a validator built from parts cannot silently alias two
      * different identities (`a` + `1x` vs `a1` + `x`).
-     *
-     * @param string ...$parts
      */
     private function validatorSource(string ...$parts): string
     {
@@ -332,9 +330,9 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
             // and it has to strip *both* sides now that this class marks its
             // own fallback validator weak. Stripping only the client's turned
             // every 304 into a 200 the moment ours grew a `W/`.
-            $ours = self::withoutWeakness($etag);
+            $ours = $this->withoutWeakness($etag);
             foreach (explode(',', $ifNoneMatch) as $candidate) {
-                if (self::withoutWeakness(trim($candidate)) === $ours) {
+                if ($this->withoutWeakness(trim($candidate)) === $ours) {
                     return true;
                 }
             }
@@ -406,7 +404,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
      * once the prefix is gone, but a client's header is not this class's to
      * assume things about.
      */
-    private static function withoutWeakness(string $etag): string
+    private function withoutWeakness(string $etag): string
     {
         return str_starts_with($etag, 'W/') ? substr($etag, 2) : $etag;
     }

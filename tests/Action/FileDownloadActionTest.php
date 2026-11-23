@@ -204,7 +204,7 @@ final class FileDownloadActionTest
         $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb')));
 
         Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
-        Assert::false((bool) str_contains($response->getHeaderLine('Content-Disposition'), 'inline'));
+        Assert::false(str_contains($response->getHeaderLine('Content-Disposition'), 'inline'));
     }
 
     /**

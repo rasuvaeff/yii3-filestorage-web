@@ -21,22 +21,22 @@ use Rasuvaeff\Yii3Filestorage\Store\DerivativeResolverInterface;
  *
  * @internal
  */
-final class MemoryDerivativeResolver implements DerivativeResolverInterface
+final readonly class MemoryDerivativeResolver implements DerivativeResolverInterface
 {
     /**
      * @param array<string, array{extension: non-empty-string, mediaType: non-empty-string}> $presets
      * @param array<string, non-empty-string> $bodies Keyed `"fileId/variant"`.
      */
     public function __construct(
-        private readonly array $presets = [],
-        private readonly array $bodies = [],
-        private readonly ?FilestorageException $streamFailure = null,
+        private array $presets = [],
+        private array $bodies = [],
+        private ?FilestorageException $streamFailure = null,
     ) {}
 
     #[Override]
     public function stream(File $file, string $presetName): ?StreamInterface
     {
-        if ($this->streamFailure !== null) {
+        if ($this->streamFailure instanceof \Rasuvaeff\Yii3Filestorage\Exception\FilestorageException) {
             throw $this->streamFailure;
         }
 
