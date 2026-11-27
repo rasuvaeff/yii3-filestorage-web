@@ -151,6 +151,13 @@ final class HmacProxyUrlGeneratorTest
         );
     }
 
+    public function anEmptyPinnedScopeIsRefused(): void
+    {
+        Expect::exception(InvalidArgumentException::class)->withMessageContaining('cannot be empty');
+
+        (new HmacProxyUrlGenerator(Fixtures::signer()))->forScope('');
+    }
+
     /**
      * The route travels with the copy.
      */

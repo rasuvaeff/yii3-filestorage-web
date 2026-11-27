@@ -71,9 +71,15 @@ final readonly class HmacProxyUrlGenerator implements ProxyUrlGeneratorInterface
      * for links minted where no request names the tenant. `null` is an
      * explicit "unscoped": the link resolves only files stored without a
      * scope.
+     *
+     * @throws InvalidArgumentException For an empty scope id.
      */
     public function forScope(?string $scopeId): self
     {
+        if ($scopeId === '') {
+            throw new InvalidArgumentException('A scope id cannot be empty; pass null for an unscoped link');
+        }
+
         return new self(
             signer: $this->signer,
             route: $this->route,

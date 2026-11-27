@@ -15,6 +15,9 @@ use Rasuvaeff\Yii3Filestorage\Repository\FileScopeProviderInterface;
  */
 final readonly class PinnedScope implements FileScopeProviderInterface
 {
+    /**
+     * @param non-empty-string|null $scopeId
+     */
     public function __construct(
         private ?string $scopeId,
     ) {}
