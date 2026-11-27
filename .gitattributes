@@ -14,3 +14,4 @@
 /benchmarks export-ignore
 /build export-ignore
 /Makefile export-ignore
+/composer-require-checker.json export-ignore

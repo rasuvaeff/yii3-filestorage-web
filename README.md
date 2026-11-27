@@ -21,7 +21,7 @@ action that serves them without any of the ways this usually goes wrong.
 ## Requirements
 
 - PHP 8.3+
-- `rasuvaeff/yii3-filestorage` ^0.8.2, plus a store backend
+- `rasuvaeff/yii3-filestorage` ^0.9, plus a store backend
 - `rasuvaeff/yii3-filestorage-db` — for `ScopedFileResolverInterface`, which
   this package needs and does not provide
 - `yiisoft/http` ^1.2, a PSR-17 implementation and a PSR-20 clock
@@ -129,7 +129,7 @@ authoritative checks still run in `Storage::add()`, because a client's
 
 `Derivatives::urlFor()` in `rasuvaeff/yii3-filestorage-images` mints variant
 tokens for the same private-store reason the core mints original ones. This
-package serves them: install `-images` and the core's
+package serves them: install `-images` (0.8+ on core ^0.9) and the core's
 `DerivativeResolverInterface` contract gets an implementation (`Derivatives`
 itself), which the action picks up as an optional dependency — the wiring needs
 nothing beyond installing both packages.

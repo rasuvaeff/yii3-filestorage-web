@@ -21,7 +21,7 @@ HTTP-половина [`rasuvaeff/yii3-filestorage`](https://github.com/rasuvaef
 ## Требования
 
 - PHP 8.3+
-- `rasuvaeff/yii3-filestorage` ^0.8.2 плюс backend хранилища
+- `rasuvaeff/yii3-filestorage` ^0.9 плюс backend хранилища
 - `rasuvaeff/yii3-filestorage-db` — ради `ScopedFileResolverInterface`, который
   нужен этому пакету и которого он не предоставляет
 - `yiisoft/http` ^1.2, реализация PSR-17 и PSR-20-часы
@@ -130,7 +130,7 @@ FileUploadAction::class => static fn (StorageInterface $storage, ...) =>
 
 `Derivatives::urlFor()` из `rasuvaeff/yii3-filestorage-images` выпускает
 variant-токены по той же причине, что и ядро для оригиналов. Этот пакет их
-отдаёт: установите `-images`, и контракт
+отдаёт: установите `-images` (0.8+ на ядре ^0.9), и контракт
 `DerivativeResolverInterface` из ядра получит реализацию (сам фасад
 `Derivatives`), которую экшен подхватывает как опциональную зависимость —
 проводки помимо установки двух пакетов не нужно.
