@@ -49,16 +49,23 @@ return [
         $params['rasuvaeff/yii3-filestorage-web']['extraActiveMediaTypes'],
     ),
 
-    // Core declares this optional and leaves it unbound; installing this
-    // package is what gives a private store a URL at all.
-    ProxyUrlGeneratorInterface::class => static fn (
+    // Bound by class too, so a background job can ask for the concrete
+    // generator and call forScope() — autowiring it instead would silently
+    // use the default route and no scope provider.
+    HmacProxyUrlGenerator::class => static fn (
         UrlSignerInterface $signer,
         ?FileScopeProviderInterface $scopes = null,
-    ): ProxyUrlGeneratorInterface => new HmacProxyUrlGenerator(
+    ): HmacProxyUrlGenerator => new HmacProxyUrlGenerator(
         signer: $signer,
         route: (string) $params['rasuvaeff/yii3-filestorage-web']['route'],
         scopes: $scopes,
     ),
+
+    // Core declares this optional and leaves it unbound; installing this
+    // package is what gives a private store a URL at all.
+    ProxyUrlGeneratorInterface::class => static fn (
+        HmacProxyUrlGenerator $generator,
+    ): ProxyUrlGeneratorInterface => $generator,
 
     FileResponseFactory::class => static fn (
         ResponseFactoryInterface $responses,

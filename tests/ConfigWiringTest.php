@@ -74,6 +74,22 @@ final class ConfigWiringTest
     }
 
     /**
+     * A background job asks for the concrete generator to call `forScope()`.
+     * Autowiring it would have used the default route and no scope provider;
+     * the binding hands out the same configured instance the interface gets.
+     */
+    public function theConcreteGeneratorIsTheConfiguredOne(): void
+    {
+        $container = $this->container(paramOverrides: ['route' => 'https://app.example.com/dl/{token}']);
+
+        $concrete = $container->get(HmacProxyUrlGenerator::class);
+
+        Assert::same($container->get(ProxyUrlGeneratorInterface::class), $concrete);
+        Assert::string($concrete->forScope('tenant-a')->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')))
+            ->contains('https://app.example.com/dl/v1.k1.');
+    }
+
+    /**
      * `-images` is optional: without a DerivativeResolverInterface binding the
      * action still builds, and a variant token is a 404 — never the original.
      */
@@ -169,11 +185,12 @@ final class ConfigWiringTest
 
     /**
      * @param array<string, mixed> $extra
+     * @param array<string, mixed> $paramOverrides
      */
-    private function container(array $extra = []): Container
+    private function container(array $extra = [], array $paramOverrides = []): Container
     {
         $psr = Fixtures::factory();
-        $definitions = $this->definitions();
+        $definitions = $this->definitions($paramOverrides);
 
         $definitions[ClockInterface::class] = static fn(): ClockInterface => new StaticClock(Fixtures::now());
         $definitions[ResponseFactoryInterface::class] = static fn(): ResponseFactoryInterface => $psr;

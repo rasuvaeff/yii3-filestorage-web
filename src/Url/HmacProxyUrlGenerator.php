@@ -26,6 +26,14 @@ use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
  * the id leaks — {@see \Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction}
  * matches both, and never looks a file up by id alone.
  *
+ * Outside a request — a queued email, a report job — there is usually no
+ * current tenant: the provider answers null, the token says "unscoped", and
+ * the download then looks the tenant's file up under `scope IS NULL` and
+ * answers 404. Nothing leaks, but the link is dead. Such code names the tenant
+ * with {@see self::forScope()}, or enters the tenant's context so the provider
+ * answers it; `File` does not carry its scope, so this class cannot take it
+ * from the file.
+ *
  * @api
  */
 final readonly class HmacProxyUrlGenerator implements ProxyUrlGeneratorInterface
@@ -56,6 +64,21 @@ final readonly class HmacProxyUrlGenerator implements ProxyUrlGeneratorInterface
         // The early return above guarantees a non-empty route, so `url()`
         // can promise a non-empty result.
         $this->route = $route;
+    }
+
+    /**
+     * A copy that stamps `$scopeId` into every token, ignoring the provider —
+     * for links minted where no request names the tenant. `null` is an
+     * explicit "unscoped": the link resolves only files stored without a
+     * scope.
+     */
+    public function forScope(?string $scopeId): self
+    {
+        return new self(
+            signer: $this->signer,
+            route: $this->route,
+            scopes: new PinnedScope($scopeId),
+        );
     }
 
     #[Override]

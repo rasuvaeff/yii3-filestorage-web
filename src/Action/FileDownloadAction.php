@@ -46,7 +46,9 @@ use Yiisoft\Router\CurrentRoute;
  *    is served without a session on purpose, so the tenant travels inside the
  *    HMAC and is matched as a second predicate.
  * 3. **Conditional requests are answered before a body is built.** A `304`
- *    never opens the store.
+ *    never opens the store and never generates a rendition. `If-Modified-Since`
+ *    confirms only an inline response: a date cannot say which disposition
+ *    the client holds, the ETag can.
  * 4. **Active content is an attachment, whatever the policy says.** An HTML or
  *    SVG file served inline from your own origin is stored XSS; `nosniff` stops
  *    a browser from finding one where the media type says there is none.
@@ -165,7 +167,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($mediaType);
 
         $etag = $this->etag($file, $mediaType, $inline);
-        if ($this->isCurrent($request, $etag, $file->updatedAt)) {
+        if ($this->isCurrent($request, $etag, $file->updatedAt, $inline)) {
             return $this->validators($this->responses->createResponse(Status::NOT_MODIFIED), $etag, $file);
         }
 
@@ -214,11 +216,6 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         // surfaces from the resolver as a FilestorageException, which handle()
         // already maps to 404.
         $descriptor = $this->derivatives->descriptor($variant);
-        $stream = $this->derivatives->stream($file, $variant);
-        if (!$stream instanceof StreamInterface) {
-            return $this->notFound();
-        }
-
         $options = DeliveryOptions::forVariant(
             $file,
             $this->deliveryPolicies->for($file->groupName),
@@ -227,9 +224,18 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         $mediaType = MediaType::headerSafe($options->responseMediaType);
         $inline = !$options->forceDownload && !$this->activeMediaTypes->contains($mediaType);
 
+        // Everything the validator needs comes from the descriptor, so the
+        // conditional answer is given before `stream()` — which may have to
+        // *generate* the rendition. Asking it first made every revalidation
+        // of a thumbnail cost a store read, or a full decode (review 1.0 #5).
         $etag = $this->variantEtag($file, $descriptor, $mediaType, $inline);
-        if ($this->isCurrent($request, $etag, $file->updatedAt)) {
+        if ($this->isCurrent($request, $etag, $file->updatedAt, $inline)) {
             return $this->validators($this->responses->createResponse(Status::NOT_MODIFIED), $etag, $file);
+        }
+
+        $stream = $this->derivatives->stream($file, $variant);
+        if (!$stream instanceof StreamInterface) {
+            return $this->notFound();
         }
 
         $response = $this->downloads->create(
@@ -316,8 +322,21 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         return implode('|', $parts);
     }
 
-    private function isCurrent(ServerRequestInterface $request, string $etag, DateTimeImmutable $updatedAt): bool
-    {
+    /**
+     * `If-Modified-Since` is honoured only for an inline response. The ETag
+     * carries the disposition so that a policy change cannot leave a cached
+     * `inline` behind; a date carries nothing of the kind, so a client
+     * revalidating by date alone would get a 304 and keep the `inline` copy of
+     * a file that is now an attachment (review 1.0 #9). Confirming an inline
+     * response by date is harmless whatever the client holds — the worst it
+     * can keep is an older *attachment*.
+     */
+    private function isCurrent(
+        ServerRequestInterface $request,
+        string $etag,
+        DateTimeImmutable $updatedAt,
+        bool $inline,
+    ): bool {
         $ifNoneMatch = trim($request->getHeaderLine(Header::IF_NONE_MATCH));
         if ($ifNoneMatch !== '') {
             // `If-None-Match` wins outright when present: RFC 9110 says a
@@ -341,7 +360,7 @@ final readonly class FileDownloadAction implements RequestHandlerInterface
         }
 
         $ifModifiedSince = trim($request->getHeaderLine(Header::IF_MODIFIED_SINCE));
-        if ($ifModifiedSince === '') {
+        if (!$inline || $ifModifiedSince === '') {
             return false;
         }
 

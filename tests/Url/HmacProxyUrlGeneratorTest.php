@@ -98,6 +98,71 @@ final class HmacProxyUrlGeneratorTest
     }
 
     /**
+     * Review 1.0 #11. A link minted outside a request — a queued email, a
+     * report job — has no current tenant: the provider answers null, the
+     * token said "unscoped", and the download looked the tenant's file up
+     * under `scope IS NULL`: a 404 in the recipient's inbox. `forScope()`
+     * states the tenant explicitly and ignores the provider.
+     */
+    public function aJobMintsForTheTenantItNames(): void
+    {
+        $generator = new HmacProxyUrlGenerator(Fixtures::signer(), scopes: new FixedScope(null));
+
+        $pinned = $generator->forScope('tenant-a');
+        $original = Fixtures::signer()->verify(
+            substr($pinned->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')), strlen('/files/')),
+        );
+        $variant = Fixtures::signer()->verify(
+            substr($pinned->variantUrl(Fixtures::file(), 'thumb', Fixtures::now()->modify('+1 hour')), strlen('/files/')),
+        );
+
+        Assert::same($original?->scopeId, 'tenant-a');
+        Assert::same($variant?->scopeId, 'tenant-a');
+        Assert::same($variant?->variant, 'thumb');
+    }
+
+    /**
+     * The pinned scope wins over a provider that does answer, and pinning
+     * null is an explicit "unscoped" — never "whatever the provider says".
+     */
+    public function aPinnedScopeOverridesTheProvider(): void
+    {
+        $generator = new HmacProxyUrlGenerator(Fixtures::signer(), scopes: new FixedScope('tenant-a'));
+
+        $toB = Fixtures::signer()->verify(substr(
+            $generator->forScope('tenant-b')->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')),
+            strlen('/files/'),
+        ));
+        $unscoped = Fixtures::signer()->verify(substr(
+            $generator->forScope(null)->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')),
+            strlen('/files/'),
+        ));
+
+        Assert::same($toB?->scopeId, 'tenant-b');
+        Assert::notNull($unscoped);
+        Assert::null($unscoped?->scopeId);
+        // the original is untouched
+        Assert::same(
+            Fixtures::signer()->verify(substr(
+                $generator->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')),
+                strlen('/files/'),
+            ))?->scopeId,
+            'tenant-a',
+        );
+    }
+
+    /**
+     * The route travels with the copy.
+     */
+    public function aPinnedCopyKeepsTheRoute(): void
+    {
+        $generator = new HmacProxyUrlGenerator(Fixtures::signer(), 'https://cdn.example.com/d/{token}');
+
+        Assert::string($generator->forScope('tenant-a')->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')))
+            ->contains('https://cdn.example.com/d/v1.k1.');
+    }
+
+    /**
      * A route with no placeholder produces the same URL for every file — one
      * that resolves to whatever the router does with it, which is not a
      * download. Better to refuse at wiring time than to serve it.
