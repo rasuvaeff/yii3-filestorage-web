@@ -10,7 +10,7 @@ use Rasuvaeff\Yii3Filestorage\File;
 use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
+use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\ByteRange;
 use Testo\Bench;
 use Yiisoft\Test\Support\Clock\StaticClock;

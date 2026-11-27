@@ -9,7 +9,7 @@ namespace Rasuvaeff\Yii3FilestorageWeb\Http;
  *
  * Single is the whole point. The delivery decision — inline or attachment — is
  * taken by looking the type up in
- * {@see \Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes}, and the
+ * {@see \Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes}, and the
  * `Content-Type` header is written from the same type. Cleaning only at the
  * header end left one string in between: a stored `text/ht\r\nml` misses the
  * active-type lookup, is therefore ruled inline, and is then emitted as

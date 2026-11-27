@@ -11,10 +11,9 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Http\Message\UploadedFileInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Rasuvaeff\Yii3Filestorage\Exception\ContentTooLargeException;
+use Rasuvaeff\Yii3Filestorage\Exception\PolicyViolationException;
+use Rasuvaeff\Yii3Filestorage\Exception\SizeLimitExceededException;
 use Rasuvaeff\Yii3Filestorage\Exception\UnsupportedMediaTypeException;
-use Rasuvaeff\Yii3Filestorage\Exception\UploadSizeException;
-use Rasuvaeff\Yii3Filestorage\Exception\UploadTooLargeException;
 use Rasuvaeff\Yii3Filestorage\File;
 use Rasuvaeff\Yii3Filestorage\StorageInterface;
 use Rasuvaeff\Yii3Filestorage\Upload;
@@ -102,11 +101,14 @@ final readonly class FileUploadAction implements RequestHandlerInterface
         try {
             $upload = Upload::fromUploadedFile($uploaded, $this->streams);
             $file = $this->storage->add(upload: $upload, groupName: $this->groupName);
-        } catch (UploadTooLargeException|UploadSizeException|ContentTooLargeException) {
+        } catch (SizeLimitExceededException) {
+            // Core's one marker for every "too large" — the group's cap, the
+            // spool cap, a store refusing mid-write. Listing classes here is
+            // how a new one turned into a 400 or a 500.
             return $this->error(Status::PAYLOAD_TOO_LARGE, 'The upload exceeds the group\'s size limit');
         } catch (UnsupportedMediaTypeException $e) {
             return $this->error(Status::UNSUPPORTED_MEDIA_TYPE, $e->getMessage());
-        } catch (\Rasuvaeff\Yii3Filestorage\Exception\PolicyViolationException $e) {
+        } catch (PolicyViolationException $e) {
             // Pixel caps and any future accept rule: the client's file is
             // wrong, not the server.
             return $this->error(Status::BAD_REQUEST, $e->getMessage());

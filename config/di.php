@@ -14,7 +14,7 @@ use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\ProxyUrlGeneratorInterface;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
+use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
 use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
@@ -44,10 +44,6 @@ return [
         ClockInterface $clock,
         SigningKeyRing $keys,
     ): UrlSignerInterface => new HmacUrlSigner(clock: $clock, keys: $keys),
-
-    ActiveMediaTypes::class => static fn (): ActiveMediaTypes => ActiveMediaTypes::withExtra(
-        $params['rasuvaeff/yii3-filestorage-web']['extraActiveMediaTypes'],
-    ),
 
     // Bound by class too, so a background job can ask for the concrete
     // generator and call forScope() — autowiring it instead would silently
@@ -90,7 +86,6 @@ return [
         DeliveryPolicyRegistry $deliveryPolicies,
         FileResponseFactory $downloads,
         ResponseFactoryInterface $responses,
-        ActiveMediaTypes $activeMediaTypes,
         ?CurrentRoute $currentRoute = null,
         ?DerivativeResolverInterface $derivatives = null,
     ): FileDownloadAction => new FileDownloadAction(
@@ -100,7 +95,13 @@ return [
         deliveryPolicies: $deliveryPolicies,
         downloads: $downloads,
         responses: $responses,
-        activeMediaTypes: $activeMediaTypes,
+        // Core's list (one for the whole family) plus the application's
+        // extras. Built here rather than bound: `ActiveMediaTypes` is core's
+        // class, and binding a key another vendor package owns is the
+        // `Duplicate key` error waiting for the day core binds it.
+        activeMediaTypes: ActiveMediaTypes::withExtra(
+            $params['rasuvaeff/yii3-filestorage-web']['extraActiveMediaTypes'],
+        ),
         cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
         tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
         currentRoute: $currentRoute,

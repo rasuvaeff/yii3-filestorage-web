@@ -7,6 +7,8 @@ namespace Rasuvaeff\Yii3FilestorageWeb\Tests;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
+use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\RepositoryInterface;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
@@ -15,13 +17,14 @@ use Rasuvaeff\Yii3Filestorage\Store\DerivativeResolverInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
 use Rasuvaeff\Yii3Filestorage\Test\InMemoryStore;
+use Rasuvaeff\Yii3Filestorage\Upload;
 use Rasuvaeff\Yii3Filestorage\Url\ProxyUrlGeneratorInterface;
 use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
+use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\InMemoryResolver;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\MemoryDerivativeResolver;
@@ -52,7 +55,6 @@ final class ConfigWiringTest
         Assert::instanceOf($container->get(UrlSignerInterface::class), UrlSignerInterface::class);
         Assert::instanceOf($container->get(ProxyUrlGeneratorInterface::class), HmacProxyUrlGenerator::class);
         Assert::instanceOf($container->get(FileResponseFactory::class), FileResponseFactory::class);
-        Assert::instanceOf($container->get(ActiveMediaTypes::class), ActiveMediaTypes::class);
         Assert::instanceOf($container->get(FileDownloadAction::class), FileDownloadAction::class);
     }
 
@@ -87,6 +89,38 @@ final class ConfigWiringTest
         Assert::same($container->get(ProxyUrlGeneratorInterface::class), $concrete);
         Assert::string($concrete->forScope('tenant-a')->url(Fixtures::file(), Fixtures::now()->modify('+1 hour')))
             ->contains('https://app.example.com/dl/v1.k1.');
+    }
+
+    /**
+     * The active-type list is core's (`Mime\ActiveMediaTypes`, one list for
+     * the family), so this package must not bind its key — and the
+     * application's extras still have to reach the action.
+     */
+    public function extraActiveMediaTypesReachTheActionWithoutBindingCoresKey(): void
+    {
+        Assert::false(\array_key_exists(ActiveMediaTypes::class, $this->definitions()));
+
+        $store = new InMemoryStore('memory', Fixtures::factory(), new StaticClock(Fixtures::now()));
+        $store->write(
+            Upload::fromStream(Fixtures::factory()->createStream('hello world'), 'a.txt', Fixtures::factory()),
+            'common',
+            new FixedPath('common/ab/cd/key/original.txt'),
+        );
+        $inline = [
+            DeliveryPolicyRegistry::class => static fn(): DeliveryPolicyRegistry
+                => new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+            StoreRegistry::class => static fn(): StoreRegistry => new StoreRegistry([$store]),
+        ];
+        $token = Fixtures::signer()->sign(new SignedPayload(fileId: 'file-1'), Fixtures::now()->modify('+1 hour'));
+
+        $stock = $this->container($inline)->get(FileDownloadAction::class);
+        $strict = $this->container($inline, ['extraActiveMediaTypes' => ['text/plain']])
+            ->get(FileDownloadAction::class);
+
+        Assert::string($stock->handle(Fixtures::request($token))->getHeaderLine('Content-Disposition'))
+            ->contains('inline');
+        Assert::string($strict->handle(Fixtures::request($token))->getHeaderLine('Content-Disposition'))
+            ->contains('attachment');
     }
 
     /**

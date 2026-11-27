@@ -9,6 +9,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Rasuvaeff\Understudy\Arg;
 use Rasuvaeff\Understudy\Understudy;
 use Rasuvaeff\Yii3Filestorage\Exception\StoreException;
+use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
@@ -17,7 +18,6 @@ use Rasuvaeff\Yii3Filestorage\Test\InMemoryStore;
 use Rasuvaeff\Yii3Filestorage\Upload;
 use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
@@ -828,6 +828,9 @@ final class FileDownloadActionTest
         yield 'svg' => ['image/svg+xml'];
         yield 'xml' => ['application/xml'];
         yield 'html with a charset' => ['text/html; charset=utf-8'];
+        // Core's list since 0.10 — the package's own had neither.
+        yield 'javascript' => ['text/javascript'];
+        yield 'an rss feed' => ['application/rss+xml'];
     }
 
     public function harmlessContentHonoursAnInlinePolicy(): void
