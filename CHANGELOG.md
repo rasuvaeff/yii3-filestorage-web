@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.1 — 2026-11-27
+
+- Docs: the agent skill says variant tokens are served through `DerivativeResolverInterface` (404 without one), instead of "refused until the images package exists".
+
 ## 0.5.0 — 2026-11-27
 
 - **Changed:** requires `rasuvaeff/yii3-filestorage` `^0.8.2`, so the whole family installs on one line of the core. This release no longer installs with core 0.3; stay on 0.4.1 for those.

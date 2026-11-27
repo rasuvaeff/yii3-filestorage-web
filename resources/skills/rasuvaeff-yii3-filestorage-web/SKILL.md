@@ -34,8 +34,10 @@ Serving a stored file over a signed URL. Namespace
    active-type lookup, the validator and the header — cleaning only at the
    header lets `text/ht\r\nml` miss the list and still arrive as `text/html`.
 
-5. **Refuse a token carrying a `variant`** until the images package exists.
-   Serving the original instead defeats the reason the variant is signed.
+5. **A `variant` token is served only through `DerivativeResolverInterface`**
+   (bound by `yii3-filestorage-images`). Without a resolver, or for an unknown
+   preset, it answers 404 — never the original, which would defeat the reason
+   the variant is signed.
 
 6. **Advertise ranges only where they are cheap.** Ask
    `RangeReadableStoreInterface` first, use a stream that is both seekable and
