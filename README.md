@@ -21,7 +21,7 @@ action that serves them without any of the ways this usually goes wrong.
 ## Requirements
 
 - PHP 8.3+
-- `rasuvaeff/yii3-filestorage` ^0.1, plus a store backend
+- `rasuvaeff/yii3-filestorage` ^0.8.2, plus a store backend
 - `rasuvaeff/yii3-filestorage-db` — for `ScopedFileResolverInterface`, which
   this package needs and does not provide
 - `yiisoft/http` ^1.2, a PSR-17 implementation and a PSR-20 clock

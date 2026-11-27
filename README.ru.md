@@ -21,7 +21,7 @@ HTTP-половина [`rasuvaeff/yii3-filestorage`](https://github.com/rasuvaef
 ## Требования
 
 - PHP 8.3+
-- `rasuvaeff/yii3-filestorage` ^0.1 плюс backend хранилища
+- `rasuvaeff/yii3-filestorage` ^0.8.2 плюс backend хранилища
 - `rasuvaeff/yii3-filestorage-db` — ради `ScopedFileResolverInterface`, который
   нужен этому пакету и которого он не предоставляет
 - `yiisoft/http` ^1.2, реализация PSR-17 и PSR-20-часы
