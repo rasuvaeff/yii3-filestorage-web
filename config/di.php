@@ -8,6 +8,7 @@ use Psr\Http\Message\StreamFactoryInterface;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\FileScopeProviderInterface;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
+use Rasuvaeff\Yii3Filestorage\Store\DerivativeResolverInterface;
 use Rasuvaeff\Yii3Filestorage\Store\StoreRegistry;
 use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\ProxyUrlGeneratorInterface;
@@ -70,6 +71,11 @@ return [
     // cannot be resolved) and the action reads the token from the request
     // attribute alone. In a yiisoft/router application CurrentRoute is the
     // same singleton the Router middleware populated.
+    //
+    // `derivatives` follows the same optional-dep rule: `-images` binds
+    // DerivativeResolverInterface, and without it every variant token is a 404.
+    // Not passing it here made that 404 the only behaviour even with `-images`
+    // installed.
     FileDownloadAction::class => static fn (
         UrlSignerInterface $signer,
         ScopedFileResolverInterface $files,
@@ -79,6 +85,7 @@ return [
         ResponseFactoryInterface $responses,
         ActiveMediaTypes $activeMediaTypes,
         ?CurrentRoute $currentRoute = null,
+        ?DerivativeResolverInterface $derivatives = null,
     ): FileDownloadAction => new FileDownloadAction(
         signer: $signer,
         files: $files,
@@ -90,5 +97,6 @@ return [
         cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
         tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
         currentRoute: $currentRoute,
+        derivatives: $derivatives,
     ),
 ];

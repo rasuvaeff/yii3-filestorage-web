@@ -25,8 +25,9 @@ provides.
 3. **Conditional GET is answered before the store is opened.**
 4. **Active content is forced to attachment** whatever the delivery policy
    says, plus `nosniff`.
-5. **A token carrying a `variant` is refused** until the images package exists —
-   never served the original.
+5. **A token carrying a `variant` is served only through
+   `DerivativeResolverInterface`** (bound by `rasuvaeff/yii3-filestorage-images`,
+   picked up by `config/di.php`); without one it is a 404 — never the original.
 6. **The token has two sources.** A request attribute named by
    `tokenAttribute` first, then the route argument of the same name in
    `yiisoft/router`'s `CurrentRoute` — that router never copies its arguments
@@ -68,10 +69,11 @@ new FileDownloadAction(
     string $cacheControl = 'private, max-age=3600',
     string $tokenAttribute = 'token',
     ?CurrentRoute $currentRoute = null,
+    ?DerivativeResolverInterface $derivatives = null,
 );
 ```
 
-Order: verify token → refuse a variant → resolve in scope → delivery policy
+Order: verify token → resolve in scope → (variant: through the resolver, 404 without one) → delivery policy
 (disposition, media type) → ETag/`304` → open the store → response →
 `nosniff`. The delivery decision comes *before* the validator because the
 validator depends on it.
