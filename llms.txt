@@ -9,9 +9,13 @@ Namespace `Rasuvaeff\Yii3FilestorageWeb\`. PHP 8.3–8.5.
 composer require rasuvaeff/yii3-filestorage-web
 ```
 
-Binds `SigningKeyRing`, `UrlSignerInterface`, `ProxyUrlGeneratorInterface`,
-`FileResponseFactory`, `ActiveMediaTypes` and `FileDownloadAction`. Does NOT
-bind `StorageInterface`, `RepositoryInterface` or `StoreInterface`.
+Requires `rasuvaeff/yii3-filestorage` ^0.10.
+
+Binds `SigningKeyRing`, `UrlSignerInterface`, `HmacProxyUrlGenerator` (by class,
+for `forScope()`), `ProxyUrlGeneratorInterface` (the same instance),
+`FileResponseFactory` and `FileDownloadAction`. Does NOT bind
+`StorageInterface`, `RepositoryInterface`, `StoreInterface` or core's
+`Mime\ActiveMediaTypes` (the action builds it from `extraActiveMediaTypes`).
 
 Needs `ScopedFileResolverInterface`, which `rasuvaeff/yii3-filestorage-db`
 provides.
@@ -22,9 +26,13 @@ provides.
    bytes. A 403 confirms the id exists.
 2. **The scope comes from the token, never the request.** Never resolve by id
    alone.
-3. **Conditional GET is answered before the store is opened.**
+3. **Conditional GET is answered before the store is opened** — and before a
+   rendition is read or generated. `If-Modified-Since` confirms only an inline
+   response (a date cannot tell which disposition the client holds);
+   `If-None-Match` works for both.
 4. **Active content is forced to attachment** whatever the delivery policy
-   says, plus `nosniff`.
+   says, plus `nosniff`. The list is core's `Mime\ActiveMediaTypes` plus
+   `extraActiveMediaTypes`.
 5. **A token carrying a `variant` is served only through
    `DerivativeResolverInterface`** (bound by `rasuvaeff/yii3-filestorage-images`,
    picked up by `config/di.php`); without one it is a 404 — never the original.
@@ -44,7 +52,7 @@ provides.
     'tokenAttribute' => 'token',        // request attribute AND route placeholder name
     'cacheControl' => 'private, max-age=3600',
     'signingKeys' => ['active' => '2026-08', 'keys' => ['2026-08' => '…32+ bytes…']],
-    'extraActiveMediaTypes' => [],      // added to the built-in list
+    'extraActiveMediaTypes' => [],      // added to core's Mime\ActiveMediaTypes::DEFAULT
 ],
 ```
 
@@ -65,7 +73,7 @@ new FileDownloadAction(
     DeliveryPolicyRegistry $deliveryPolicies,
     FileResponseFactory $downloads,
     ResponseFactoryInterface $responses,
-    ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),
+    ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),  // Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes
     string $cacheControl = 'private, max-age=3600',
     string $tokenAttribute = 'token',
     ?CurrentRoute $currentRoute = null,
@@ -73,9 +81,9 @@ new FileDownloadAction(
 );
 ```
 
-Order: verify token → resolve in scope → (variant: through the resolver, 404 without one) → delivery policy
-(disposition, media type) → ETag/`304` → open the store → response →
-`nosniff`. The delivery decision comes *before* the validator because the
+Order: verify token → resolve in scope → (variant: 404 without a resolver) → delivery policy
+(disposition, media type; a variant's from its descriptor) → ETag/`304` → open the store
+or `stream()` the rendition → response → `nosniff`. The delivery decision comes *before* the validator because the
 validator depends on it.
 
 ETag hashes the content hash when there is one, else the triple
@@ -83,7 +91,7 @@ ETag hashes the content hash when there is one, else the triple
 media type are appended in both cases. Without a content hash it is marked
 weak (`W/`) — enough for `If-None-Match`, never enough for `If-Range`.
 `If-None-Match` (including `W/` and `*`) wins over `If-Modified-Since`, per RFC
-9110. `Last-Modified` and `Cache-Control` are on both the `200` and the `304`.
+9110; `If-Modified-Since` is ignored for an attachment. `Last-Modified` and `Cache-Control` are on both the `200` and the `304`.
 
 A media type is normalized once (CR, LF and NUL stripped; empty becomes
 `application/octet-stream`) before it is looked up in `ActiveMediaTypes`, put
@@ -102,7 +110,13 @@ new HmacProxyUrlGenerator(
 );
 ```
 
-Stamps the *current* scope into the token at minting time.
+Stamps the *current* scope into the token at minting time. Outside a request
+(queued email, job) the provider usually answers null and the link would 404
+for a tenant's file — use
+
+`forScope(?string $scopeId): self` — a copy that stamps `$scopeId` and ignores
+the provider (`null` = explicit unscoped; `''` → `InvalidArgumentException`).
+Inject `HmacProxyUrlGenerator` (bound by class) to get the configured route.
 
 `variantUrl(File $file, string $variant, DateTimeImmutable $expiresAt): string` —
 the same, for a named rendition: the variant travels inside the signed payload,
@@ -122,8 +136,9 @@ new FileUploadAction(
 
 Accepts ONE uploaded file per request (no `addMany()` exists — atomicity);
 stores via `Storage::add()`. 201 + JSON (`id`, `originalName`, `size`,
-`mimeType`). 413: `UploadSizeException`/`UploadTooLargeException`/
-`ContentTooLargeException`/PHP size errors. 415:
+`mimeType`). 413: anything implementing core's `SizeLimitExceededException`
+(`UploadSizeException`, `UploadTooLargeException`, a store's own), PHP size
+errors. 415:
 `UnsupportedMediaTypeException`. 400: other `PolicyViolationException`, bad
 request shape. 500: `UPLOAD_ERR_NO_TMP_DIR`/`UPLOAD_ERR_CANT_WRITE`.
 
@@ -145,7 +160,8 @@ variant tokens through the core `DerivativeResolverInterface` (optional last
 constructor parameter). Unconfigured preset, missing resolver, generation
 failure — all 404. The rendition is served with its own authoritative media
 type and `original-name.variant-extension`; its ETag is always weak and covers
-`(id, updatedAt, rendition name, disposition, type)`.
+`(id, updatedAt, rendition name, disposition, type)` and is built from the
+preset's descriptor, so a `304` never generates the rendition.
 
 ### `Http\FileResponseFactory`
 
@@ -175,15 +191,9 @@ ByteRange::parse(string $header, int $size): ByteRange|false|null;
 `bytes=a-b`, `bytes=a-`, `bytes=-n`. Single ranges only.
 `$range->first`, `$range->last` (inclusive), `length()`, `contentRange($size)`.
 
-### `ActiveMediaTypes`
+### Active media types
 
-```php
-new ActiveMediaTypes();                                 // the built-in list
-ActiveMediaTypes::withExtra(['application/x-thing']);   // added to it
-$types->contains('text/html; charset=utf-8');           // true — parameters ignored
-```
-
-Built-in: `text/html`, `application/xhtml+xml`, `image/svg+xml`,
-`application/xml`, `text/xml`, `application/xslt+xml`, `text/xsl`,
-`application/mathml+xml`, `application/pdf`,
-`application/x-shockwave-flash`.
+Core's `Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes` (this package's own
+class was removed in 0.7.0): `DEFAULT` = `SCRIPTABLE` (HTML, XHTML, SVG, XML,
+XSLT, MathML, JavaScript/ECMAScript, RSS/Atom) + `PLUGIN` (PDF, Flash).
+`withExtra(list)` adds to it; `contains()` ignores case and parameters.

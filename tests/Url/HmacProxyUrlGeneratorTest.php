@@ -9,6 +9,7 @@ use Override;
 use Rasuvaeff\Yii3Filestorage\Repository\FileScopeProviderInterface;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
 use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
+use Rasuvaeff\Yii3FilestorageWeb\Url\PinnedScope;
 use Testo\Assert;
 use Testo\Codecov\Covers;
 use Testo\Data\DataProvider;
@@ -17,6 +18,7 @@ use Testo\Test;
 
 #[Test]
 #[Covers(HmacProxyUrlGenerator::class)]
+#[Covers(PinnedScope::class)]
 final class HmacProxyUrlGeneratorTest
 {
     public function putsASignedTokenIntoTheRoute(): void

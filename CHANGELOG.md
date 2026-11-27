@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- **Changed (BC break, pre-1.0):** requires `rasuvaeff/yii3-filestorage` `^0.10`. This release no longer installs with core 0.9; stay on 0.6.0 for it. Variant tokens on core 0.10 take `rasuvaeff/yii3-filestorage-images` 0.9+.
+- **Removed (BC break, pre-1.0):** `Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes`. Use core's `Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes` — same constructor, `withExtra()` and `contains()`, one list for the whole family (presigned URLs and `filestorage:check` use it too). Its `DEFAULT` adds JavaScript/ECMAScript and RSS/Atom feeds, which are now forced to attachment as well. `FileDownloadAction`'s `$activeMediaTypes` parameter takes the core class; `config/di.php` no longer binds an `ActiveMediaTypes` key (the action builds the list from `extraActiveMediaTypes`).
+- **Fixed:** a variant's conditional request is answered before `DerivativeResolverInterface::stream()`, which may generate the rendition. A `304` for a thumbnail used to cost a store read or a full decode, and a client holding a rendition whose original was gone got a 404 instead of a 304 (review 1.0 #5).
+- **Fixed:** `If-Modified-Since` confirms only an inline response. The ETag carries the disposition precisely so a policy change cannot leave a cached `inline` behind, but a date-only revalidation bypassed it: after a group switched to `forceDownload` (or a type was added to `extraActiveMediaTypes`) such a client got a `304` and kept the `inline` copy. An attachment is now always a `200` unless `If-None-Match` matches (review 1.0 #9).
+- **Added:** `HmacProxyUrlGenerator::forScope(?string $scopeId)` — a copy that stamps an explicit scope into every token. A link minted outside a request (queued email, job) used to get the provider's null scope and answer 404 for a tenant's file. `config/di.php` binds `HmacProxyUrlGenerator` by class too (the same instance as `ProxyUrlGeneratorInterface`), so a job gets the configured route (review 1.0 #11).
+- **Changed:** `FileUploadAction` maps core's `SizeLimitExceededException` marker to `413` instead of a list of classes. `ContentTooLargeException` (an inline-read cap, never thrown by `add()`) is no longer caught.
+- Added `.github/CODEOWNERS`.
+
 ## 0.6.0 — 2026-11-27
 
 - **Changed:** requires `rasuvaeff/yii3-filestorage` `^0.9` (store layouts, two-phase `gc`). This release no longer installs with core 0.8; stay on 0.5.2 for it. Serving variant tokens with core 0.9 takes `rasuvaeff/yii3-filestorage-images` 0.8+. Nothing in this package builds a stored path, so `FlatSiblingLayout` stores need no change here.

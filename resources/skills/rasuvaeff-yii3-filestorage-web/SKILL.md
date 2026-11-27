@@ -24,11 +24,18 @@ Serving a stored file over a signed URL. Namespace
    verified token, not from the request — a signed URL is served without a
    session on purpose.
 
-3. **Answer conditional requests before opening the store.** A 304 must not
-   depend on the object still being there.
+3. **Answer conditional requests before opening the store** — and before
+   asking `DerivativeResolverInterface::stream()`, which may generate the
+   rendition; a variant's validator comes from `descriptor()` alone. A 304 must
+   not depend on the object still being there. `If-Modified-Since` confirms only
+   an inline response: the ETag carries the disposition, a date does not, and a
+   304 by date would keep a cached `inline` after the policy switched to
+   attachment.
 
-4. **Force attachment for active content.** HTML, SVG, XML and friends served
-   inline from your own origin are stored XSS. The delivery policy chooses
+4. **Force attachment for active content.** HTML, SVG, XML, JavaScript, feeds
+   and friends served inline from your own origin are stored XSS. Use core's
+   `Mime\ActiveMediaTypes` (one list for the family) plus
+   `extraActiveMediaTypes` — never a second list in this package. The delivery policy chooses
    between download and display, not between safe and unsafe. Always add
    `nosniff`. Normalize the media type once (CR, LF, NUL) *before* the
    active-type lookup, the validator and the header — cleaning only at the
@@ -57,6 +64,12 @@ Serving a stored file over a signed URL. Namespace
   9110), and `W/` prefixes compare equal.
 - `If-Range` mismatch means send the whole file: resuming across a change
   splices two different files together.
+- A link minted outside a request (queued email, job) gets the provider's
+  scope at that moment — usually null, so a tenant's file answers 404. Use
+  `HmacProxyUrlGenerator::forScope($tenantId)` (inject the class; it is bound
+  with the configured route) or enter the tenant's context first.
+- Upload size refusals: catch core's `SizeLimitExceededException`, not a list
+  of classes.
 - The `route` param and the registered route must agree — one is matched, the
   other is minted into every URL.
 - Key rotation works because the key id is inside the signed envelope. Keep a
