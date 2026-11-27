@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.2 — 2026-11-27
+
+- Fixed: `config/di.php` now passes the container's `DerivativeResolverInterface` (bound by `rasuvaeff/yii3-filestorage-images`) to `FileDownloadAction`, so variant tokens are served in a stock install instead of answering 404. Without a binding it stays `null` and variant tokens remain 404. `llms.txt` no longer says variant tokens are refused (#21).
+
 ## 0.5.1 — 2026-11-27
 
 - Docs: the agent skill says variant tokens are served through `DerivativeResolverInterface` (404 without one), instead of "refused until the images package exists".
