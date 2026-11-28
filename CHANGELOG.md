@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.7.0 — 2026-11-28
+
+Pre-1.0 review fixes (#24).
 
 - **Changed (BC break, pre-1.0):** requires `rasuvaeff/yii3-filestorage` `^0.10`. This release no longer installs with core 0.9; stay on 0.6.0 for it. Variant tokens on core 0.10 take `rasuvaeff/yii3-filestorage-images` 0.9+.
 - **Removed (BC break, pre-1.0):** `Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes`. Use core's `Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes` — same constructor, `withExtra()` and `contains()`, one list for the whole family (presigned URLs and `filestorage:check` use it too). Its `DEFAULT` adds JavaScript/ECMAScript and RSS/Atom feeds, which are now forced to attachment as well. `config/di.php` does not bind an `ActiveMediaTypes` key (core does).
