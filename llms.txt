@@ -15,7 +15,9 @@ Binds `SigningKeyRing`, `UrlSignerInterface`, `HmacProxyUrlGenerator` (by class,
 for `forScope()`), `ProxyUrlGeneratorInterface` (the same instance),
 `FileResponseFactory` and `FileDownloadAction`. Does NOT bind
 `StorageInterface`, `RepositoryInterface`, `StoreInterface` or core's
-`Mime\ActiveMediaTypes` (the action builds it from `extraActiveMediaTypes`).
+`Mime\ActiveMediaTypes` (core binds it; the action reads it through
+`DeliveryPolicyRegistry`). The removed `extraActiveMediaTypes` param is
+refused at boot (`InvalidConfigException`).
 
 Needs `ScopedFileResolverInterface`, which `rasuvaeff/yii3-filestorage-db`
 provides.
@@ -31,8 +33,10 @@ provides.
    response (a date cannot tell which disposition the client holds);
    `If-None-Match` works for both.
 4. **Active content is forced to attachment** whatever the delivery policy
-   says, plus `nosniff`. The list is core's `Mime\ActiveMediaTypes` plus
-   `extraActiveMediaTypes`.
+   says, plus `nosniff`. The list is core's configured `Mime\ActiveMediaTypes`
+   (`'rasuvaeff/yii3-filestorage' => ['activeMediaTypes' => ['extra' => [],
+   'allowInline' => []]]`), read from `DeliveryPolicyRegistry`; any `*/*+xml`
+   is active.
 5. **A token carrying a `variant` is served only through
    `DerivativeResolverInterface`** (bound by `rasuvaeff/yii3-filestorage-images`,
    picked up by `config/di.php`); without one it is a 404 — never the original.
@@ -52,8 +56,9 @@ provides.
     'tokenAttribute' => 'token',        // request attribute AND route placeholder name
     'cacheControl' => 'private, max-age=3600',
     'signingKeys' => ['active' => '2026-08', 'keys' => ['2026-08' => '…32+ bytes…']],
-    'extraActiveMediaTypes' => [],      // added to core's Mime\ActiveMediaTypes::DEFAULT; feed -flysystem's S3TemporaryUrlOptions from it too
 ],
+// active types: core's 'rasuvaeff/yii3-filestorage' => ['activeMediaTypes' => ['extra' => [], 'allowInline' => []]]
+// (0.6's 'extraActiveMediaTypes' is refused at boot — move it to activeMediaTypes.extra)
 ```
 
 Route the action yourself:
@@ -72,8 +77,7 @@ new FileDownloadAction(
     StoreRegistry $stores,
     DeliveryPolicyRegistry $deliveryPolicies,
     FileResponseFactory $downloads,
-    ResponseFactoryInterface $responses,
-    ActiveMediaTypes $activeMediaTypes = new ActiveMediaTypes(),  // Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes
+    ResponseFactoryInterface $responses,      // active-type list: $deliveryPolicies->activeMediaTypes()
     string $cacheControl = 'private, max-age=3600',
     string $tokenAttribute = 'token',
     ?CurrentRoute $currentRoute = null,
@@ -119,8 +123,10 @@ the provider (`null` = explicit unscoped; `''` → `InvalidArgumentException`).
 Inject `HmacProxyUrlGenerator` (bound by class) to get the configured route.
 Facades take the unpinned generator from DI: for `-images` (0.9+) use
 `$derivatives->withProxyUrls($urls->forScope($tenantId))` (also for
-`Srcset::for()`); core `Storage::urlFor()` has no hook — call the pinned
-generator directly, or enter the tenant's context.
+`Srcset::for()`); for core `Storage::urlFor()` use
+`$storage->withProxyUrls($urls->forScope($tenantId))` (concrete `Storage`, core
+0.10+, and `-db`'s `DeduplicatingStorage` 0.4+; not on `StorageInterface`), or
+call the pinned generator directly, or enter the tenant's context.
 
 `variantUrl(File $file, string $variant, DateTimeImmutable $expiresAt): string` —
 the same, for a named rendition: the variant travels inside the signed payload,
@@ -200,4 +206,8 @@ ByteRange::parse(string $header, int $size): ByteRange|false|null;
 Core's `Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes` (this package's own
 class was removed in 0.7.0): `DEFAULT` = `SCRIPTABLE` (HTML, XHTML, SVG, XML,
 XSLT, MathML, JavaScript/ECMAScript, RSS/Atom) + `PLUGIN` (PDF, Flash).
-`withExtra(list)` adds to it; `contains()` ignores case and parameters.
+`withExtra(list)` adds to it; `contains()` ignores case and parameters and is
+true for any `*/*+xml`. Configured once in core's params (`activeMediaTypes`:
+`extra`, `allowInline`), bound by core, carried by `DeliveryPolicyRegistry`
+(`activeMediaTypes()`, `optionsFor()`, `optionsForVariant()`) — which is where
+`FileDownloadAction` reads it.

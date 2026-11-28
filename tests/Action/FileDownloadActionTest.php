@@ -58,7 +58,6 @@ final class FileDownloadActionTest
             deliveryPolicies: new DeliveryPolicyRegistry(),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
-            activeMediaTypes: new ActiveMediaTypes(),
         );
     }
 
@@ -191,10 +190,12 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+            deliveryPolicies: new DeliveryPolicyRegistry(
+                ['*' => new DeliveryPolicy(forceDownload: false)],
+                new ActiveMediaTypes(['image/webp']),
+            ),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
-            activeMediaTypes: new ActiveMediaTypes(['image/webp']),
             derivatives: new MemoryDerivativeResolver(
                 presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
                 bodies: ['file-1/thumb' => 'thumbnail bytes'],
@@ -500,7 +501,10 @@ final class FileDownloadActionTest
     public function ifModifiedSinceCannotConfirmAnAttachment(): void
     {
         $this->files->add(Fixtures::file('image', mimeType: 'image/png'));
-        $inline = new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]);
+        $inline = new DeliveryPolicyRegistry(
+            ['*' => new DeliveryPolicy(forceDownload: false)],
+            ActiveMediaTypes::withExtra(['image/png']),
+        );
         $strict = new FileDownloadAction(
             signer: Fixtures::signer(),
             files: $this->files,
@@ -508,7 +512,6 @@ final class FileDownloadActionTest
             deliveryPolicies: $inline,
             downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
             responses: Fixtures::factory(),
-            activeMediaTypes: ActiveMediaTypes::withExtra(['image/png']),
         );
 
         $response = $strict->handle(Fixtures::request($this->tokenFor('image'), [
@@ -831,6 +834,44 @@ final class FileDownloadActionTest
         // Core's list since 0.10 — the package's own had neither.
         yield 'javascript' => ['text/javascript'];
         yield 'an rss feed' => ['application/rss+xml'];
+        // Core 0.10 treats every `*/*+xml` as XML, which a browser renders
+        // and runs script in — not just the types on the list.
+        yield 'a +xml type off the list' => ['model/vnd.collada+xml'];
+    }
+
+    /**
+     * The list is core's configured one, carried by the delivery policy
+     * registry — the instance the facade's presigned URLs and `-flysystem`
+     * use too. An application's extra type is an attachment here.
+     */
+    public function theRegistrysActiveListDecides(): void
+    {
+        $action = $this->actionWithPolicy(
+            new DeliveryPolicy(forceDownload: false),
+            ActiveMediaTypes::withExtra(['image/png']),
+        );
+        $this->files->add(Fixtures::file('image', mimeType: 'image/png'));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('image')));
+
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
+    }
+
+    /**
+     * Core's PDF opt-out (`activeMediaTypes.allowInline`) reaches the proxy:
+     * a PDF in an inline group is served inline.
+     */
+    public function thePdfOptOutReachesTheProxy(): void
+    {
+        $action = $this->actionWithPolicy(
+            new DeliveryPolicy(forceDownload: false),
+            ActiveMediaTypes::fromConfig(['extra' => [], 'allowInline' => ['application/pdf']]),
+        );
+        $this->files->add(Fixtures::file('pdf', mimeType: 'application/pdf'));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('pdf')));
+
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('inline');
     }
 
     public function harmlessContentHonoursAnInlinePolicy(): void
@@ -1181,7 +1222,7 @@ final class FileDownloadActionTest
         Assert::same((string) $response->getBody(), 'hello');
     }
 
-    private function actionWithPolicy(DeliveryPolicy $policy): FileDownloadAction
+    private function actionWithPolicy(DeliveryPolicy $policy, ?ActiveMediaTypes $activeMediaTypes = null): FileDownloadAction
     {
         $factory = Fixtures::factory();
 
@@ -1189,7 +1230,7 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy]),
+            deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy], $activeMediaTypes),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
         );
@@ -1302,7 +1343,6 @@ final class FileDownloadActionTest
             deliveryPolicies: $inlinePolicies,
             downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
             responses: Fixtures::factory(),
-            activeMediaTypes: new ActiveMediaTypes(),
         );
         $inlineEtag = $permissive->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');
 
@@ -1310,10 +1350,12 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: $inlinePolicies,
+            deliveryPolicies: new DeliveryPolicyRegistry(
+                ['*' => new DeliveryPolicy(forceDownload: false)],
+                ActiveMediaTypes::withExtra(['image/png']),
+            ),
             downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
             responses: Fixtures::factory(),
-            activeMediaTypes: ActiveMediaTypes::withExtra(['image/png']),
         );
 
         $attachmentEtag = $strict->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');

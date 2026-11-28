@@ -14,7 +14,7 @@ use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\ProxyUrlGeneratorInterface;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
-use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
+use Rasuvaeff\Yii3Filestorage\Exception\InvalidConfigException;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
 use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
@@ -79,7 +79,7 @@ return [
     // DerivativeResolverInterface, and without it every variant token is a 404.
     // Not passing it here made that 404 the only behaviour even with `-images`
     // installed.
-    FileDownloadAction::class => static fn (
+    FileDownloadAction::class => static function (
         UrlSignerInterface $signer,
         ScopedFileResolverInterface $files,
         StoreRegistry $stores,
@@ -88,23 +88,30 @@ return [
         ResponseFactoryInterface $responses,
         ?CurrentRoute $currentRoute = null,
         ?DerivativeResolverInterface $derivatives = null,
-    ): FileDownloadAction => new FileDownloadAction(
-        signer: $signer,
-        files: $files,
-        stores: $stores,
-        deliveryPolicies: $deliveryPolicies,
-        downloads: $downloads,
-        responses: $responses,
-        // Core's list (one for the whole family) plus the application's
-        // extras. Built here rather than bound: `ActiveMediaTypes` is core's
-        // class, and binding a key another vendor package owns is the
-        // `Duplicate key` error waiting for the day core binds it.
-        activeMediaTypes: ActiveMediaTypes::withExtra(
-            $params['rasuvaeff/yii3-filestorage-web']['extraActiveMediaTypes'],
-        ),
-        cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
-        tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
-        currentRoute: $currentRoute,
-        derivatives: $derivatives,
-    ),
+    ) use ($params): FileDownloadAction {
+        // The active-type list is core's (`activeMediaTypes` in its params)
+        // and reaches the action through the delivery registry: one instance
+        // for the proxy, presigned URLs and `check`. This package's own key is
+        // gone (0.7.0); an application still setting it would have the types
+        // it named served inline without a word, so it is refused instead.
+        if (\array_key_exists('extraActiveMediaTypes', $params['rasuvaeff/yii3-filestorage-web'])) {
+            throw new InvalidConfigException(
+                'The "rasuvaeff/yii3-filestorage-web" param "extraActiveMediaTypes" was removed in 0.7.0: move its '
+                . 'types to "rasuvaeff/yii3-filestorage" => "activeMediaTypes" => "extra"',
+            );
+        }
+
+        return new FileDownloadAction(
+            signer: $signer,
+            files: $files,
+            stores: $stores,
+            deliveryPolicies: $deliveryPolicies,
+            downloads: $downloads,
+            responses: $responses,
+            cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
+            tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
+            currentRoute: $currentRoute,
+            derivatives: $derivatives,
+        );
+    },
 ];

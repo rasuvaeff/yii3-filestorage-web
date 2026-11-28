@@ -34,8 +34,10 @@ Serving a stored file over a signed URL. Namespace
 
 4. **Force attachment for active content.** HTML, SVG, XML, JavaScript, feeds
    and friends served inline from your own origin are stored XSS. Use core's
-   `Mime\ActiveMediaTypes` (one list for the family) plus
-   `extraActiveMediaTypes` — never a second list in this package. The delivery policy chooses
+   configured `Mime\ActiveMediaTypes` (one instance for the family, from core's
+   `activeMediaTypes.extra`/`allowInline` params), read through
+   `DeliveryPolicyRegistry` — never a second list or param in this package,
+   never a binding of `ActiveMediaTypes::class`. The delivery policy chooses
    between download and display, not between safe and unsafe. Always add
    `nosniff`. Normalize the media type once (CR, LF, NUL) *before* the
    active-type lookup, the validator and the header — cleaning only at the
@@ -70,7 +72,9 @@ Serving a stored file over a signed URL. Namespace
   with the configured route) or enter the tenant's context first. Facades
   (`Derivatives::urlFor()`, `Srcset`, core `Storage::urlFor()`) use the
   unpinned DI generator: `-images` 0.9+ has
-  `$derivatives->withProxyUrls($urls->forScope($tenantId))`; core has no hook.
+  `$derivatives->withProxyUrls($urls->forScope($tenantId))`; core 0.10+ has
+  `Storage::withProxyUrls()` (concrete class; `-db`'s `DeduplicatingStorage`
+  0.4+ too — not on `StorageInterface`).
 - Upload size refusals: catch core's `SizeLimitExceededException`, not a list
   of classes.
 - The `route` param and the registered route must agree — one is matched, the

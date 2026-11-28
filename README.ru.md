@@ -43,10 +43,15 @@ return [
             'active' => '2026-08',
             'keys' => ['2026-08' => $_ENV['FILESTORAGE_SIGNING_KEY']],
         ],
-        // Добавляются к Mime\ActiveMediaTypes ядра для прокси. Presigned-URL S3
-        // (yii3-filestorage-flysystem) берут свой список: стройте
-        // S3TemporaryUrlOptions из этого же параметра, чтобы они не расходились.
-        'extraActiveMediaTypes' => [],
+    ],
+    // Активный контент (всегда вложение) — один список ядра: его читают и
+    // прокси, и presigned-URL S3 (yii3-filestorage-flysystem 0.5+), и
+    // filestorage:check — один и тот же настроенный экземпляр.
+    'rasuvaeff/yii3-filestorage' => [
+        'activeMediaTypes' => [
+            'extra' => [],        // добавляемые типы, например 'model/vnd.usdz+zip'
+            'allowInline' => [],  // plugin-типы, которые inline-группа может показать, например 'application/pdf'
+        ],
     ],
 ];
 ```
@@ -87,7 +92,7 @@ bin2hex(random_bytes(32));"`; короче 32 байт отклоняется.
 | **Scope берётся из токена, а не из запроса** | Подписанный URL сознательно отдаётся без сессии. Тенант едет внутри HMAC и сверяется вторым предикатом, поэтому утёкший id в чужом тенанте не резолвится |
 | **Условные запросы отвечаются до открытия хранилища** | `304` стоит одного чтения метаданных — и для производной тоже: ради ответа её никогда не генерируют. Заодно клиент с актуальной копией получит `304` даже если сам объект уже исчез |
 | **`If-Modified-Since` подтверждает только inline-ответ** | Валидатор включает disposition, чтобы смена политики не оставила закэшированный `inline`; дата ничего такого не несёт. Клиент, перепроверяющий вложение только по дате, получает `200`, а не `304`, который сохранил бы старую `inline`-копию. `If-None-Match` работает в обоих случаях |
-| **Активный контент — вложение, что бы ни говорила политика** | HTML, SVG, XML, JavaScript, ленты и подобное, отданное inline с вашего origin, — это stored XSS. Список — `Mime\ActiveMediaTypes` ядра, один на всё семейство (тот же, что у подписанных ссылок и `filestorage:check`), плюс ваши `extraActiveMediaTypes`. `nosniff` не даёт браузеру найти его там, где media type утверждает обратное |
+| **Активный контент — вложение, что бы ни говорила политика** | HTML, SVG, XML, JavaScript, ленты и подобное, отданное inline с вашего origin, — это stored XSS. Список — настроенный `Mime\ActiveMediaTypes` ядра, один экземпляр на всё семейство (тот же, что у подписанных ссылок и `filestorage:check`): ваш `activeMediaTypes.extra` добавлен, `allowInline` (PDF) убран; любой `*/*+xml` в нём есть. Экшен берёт его из `DeliveryPolicyRegistry`, а не из собственного списка. `nosniff` не даёт браузеру найти его там, где media type утверждает обратное |
 | **Media type нормализуется один раз, до всех проверок** | CR, LF и NUL вырезаются до того, как тип сверяется со списком активных, попадает в валидатор и пишется в `Content-Type`. Решать по сырому значению, а чистить только на выходе — это и есть способ, которым сохранённый `text/ht\r\nml` минует список и всё равно приходит клиенту как `text/html`, inline |
 | **Токен, выписанный на variant, не получает оригинал** | Variant внутри подписи, поэтому URL превью нельзя переиграть на полноразмерный файл |
 
@@ -226,10 +231,20 @@ final readonly class SendInvoiceEmail
 | Фасад | Ссылка с закреплённым scope вне запроса |
 |---|---|
 | `Derivatives::urlFor()`, `Srcset::for()` (`yii3-filestorage-images` 0.9+) | `$derivatives->withProxyUrls($this->urls->forScope($tenantId))` — тот же фасад, выпускающий ссылки через закреплённый генератор; этот фасад и передавайте в `Srcset::for()` |
-| `Storage::urlFor()` ядра | Точки нет: вызывайте `$this->urls->forScope($tenantId)->url($file, …)` напрямую, как выше |
+| `Storage::urlFor()` ядра | `$storage->withProxyUrls($this->urls->forScope($tenantId))->urlFor($file)` — у конкретного `Storage` (ядро 0.10+) и у `DeduplicatingStorage` из `-db` (0.4+), но не у `StorageInterface`; или вызывайте закреплённый генератор напрямую, как выше |
 
 Альтернатива — войти в контекст тенанта внутри задачи, чтобы провайдер его
 вернул; тогда все фасады работают без изменений.
+
+## Переход с 0.6
+
+0.7.0 ломает две вещи, обе про список активных типов (минор до 1.0):
+
+| 0.6 | 0.7 |
+|---|---|
+| `'rasuvaeff/yii3-filestorage-web' => ['extraActiveMediaTypes' => [...]]` | `'rasuvaeff/yii3-filestorage' => ['activeMediaTypes' => ['extra' => [...]]]`. Старый ключ при загрузке **отвергается** (`InvalidConfigException` с именем нового), а не игнорируется: игнорирование отдало бы перечисленные в нём типы inline |
+| `new FileDownloadAction(..., activeMediaTypes: $list)` | Такого параметра нет: список передаётся реестру, `new DeliveryPolicyRegistry($policies, $list)` (DI ядра делает это из params) |
+| PDF всегда вложение | По-прежнему по умолчанию; `activeMediaTypes.allowInline: ['application/pdf']` позволяет inline-группе его показывать — и в прокси, и в presigned-URL |
 
 ## Ротация ключей
 

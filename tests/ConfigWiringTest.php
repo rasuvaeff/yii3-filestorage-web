@@ -7,8 +7,8 @@ namespace Rasuvaeff\Yii3FilestorageWeb\Tests;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+use Rasuvaeff\Yii3Filestorage\Exception\InvalidConfigException;
 use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
-use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\RepositoryInterface;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
@@ -32,6 +32,7 @@ use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
 use Testo\Assert;
 use Testo\Codecov\CoversNothing;
 use Testo\Test;
+use Yiisoft\Di\BuildingException;
 use Yiisoft\Di\Container;
 use Yiisoft\Di\ContainerConfig;
 use Yiisoft\Test\Support\Clock\StaticClock;
@@ -92,11 +93,13 @@ final class ConfigWiringTest
     }
 
     /**
-     * The active-type list is core's (`Mime\ActiveMediaTypes`, one list for
-     * the family), so this package must not bind its key — and the
-     * application's extras still have to reach the action.
+     * The active-type list is core's (`Mime\ActiveMediaTypes`, one instance
+     * for the family, built from core's `activeMediaTypes` param), so this
+     * package must not bind that key — and what the application configures
+     * there, extras and the PDF opt-out, has to reach the action. Core's real
+     * `config/di.php` binds both the list and the delivery registry here.
      */
-    public function extraActiveMediaTypesReachTheActionWithoutBindingCoresKey(): void
+    public function coresConfiguredActiveListReachesTheAction(): void
     {
         Assert::false(\array_key_exists(ActiveMediaTypes::class, $this->definitions()));
 
@@ -106,21 +109,44 @@ final class ConfigWiringTest
             'common',
             new FixedPath('common/ab/cd/key/original.txt'),
         );
-        $inline = [
-            DeliveryPolicyRegistry::class => static fn(): DeliveryPolicyRegistry
-                => new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+        $files = new InMemoryResolver();
+        $files->add(Fixtures::file());
+        $files->add(Fixtures::file('pdf', mimeType: 'application/pdf'));
+        $token = static fn(string $id): string
+            => Fixtures::signer()->sign(new SignedPayload(fileId: $id), Fixtures::now()->modify('+1 hour'));
+        $disposition = fn(array $activeMediaTypes, string $id): string => $this->container([
+            ...$this->coreBindings(['activeMediaTypes' => $activeMediaTypes]),
             StoreRegistry::class => static fn(): StoreRegistry => new StoreRegistry([$store]),
-        ];
-        $token = Fixtures::signer()->sign(new SignedPayload(fileId: 'file-1'), Fixtures::now()->modify('+1 hour'));
+            ScopedFileResolverInterface::class => static fn(): ScopedFileResolverInterface => $files,
+        ])->get(FileDownloadAction::class)->handle(Fixtures::request($token($id)))->getHeaderLine('Content-Disposition');
 
-        $stock = $this->container($inline)->get(FileDownloadAction::class);
-        $strict = $this->container($inline, ['extraActiveMediaTypes' => ['text/plain']])
-            ->get(FileDownloadAction::class);
+        $stock = ['extra' => [], 'allowInline' => []];
+        Assert::string($disposition($stock, 'file-1'))->contains('inline');
+        Assert::string($disposition(['extra' => ['text/plain'], 'allowInline' => []], 'file-1'))->contains('attachment');
+        Assert::string($disposition($stock, 'pdf'))->contains('attachment');
+        Assert::string($disposition(['extra' => [], 'allowInline' => ['application/pdf']], 'pdf'))->contains('inline');
+    }
 
-        Assert::string($stock->handle(Fixtures::request($token))->getHeaderLine('Content-Disposition'))
-            ->contains('inline');
-        Assert::string($strict->handle(Fixtures::request($token))->getHeaderLine('Content-Disposition'))
-            ->contains('attachment');
+    /**
+     * The package's own `extraActiveMediaTypes` param is gone (0.7.0). An
+     * application still setting it would otherwise lose those types silently —
+     * files it meant to force to attachment served inline — so booting with
+     * it is refused, naming the replacement.
+     */
+    public function aLeftoverExtraActiveMediaTypesParamIsRefused(): void
+    {
+        $container = $this->container(paramOverrides: ['extraActiveMediaTypes' => ['text/plain']]);
+
+        $refusal = null;
+
+        try {
+            $container->get(FileDownloadAction::class);
+        } catch (BuildingException $e) {
+            $refusal = $e->getPrevious();
+        }
+
+        Assert::instanceOf($refusal, InvalidConfigException::class);
+        Assert::string($refusal?->getMessage())->contains('"activeMediaTypes" => "extra"');
     }
 
     /**
@@ -177,7 +203,7 @@ final class ConfigWiringTest
     {
         $own = $this->params()['rasuvaeff/yii3-filestorage-web'];
 
-        foreach (['route', 'tokenAttribute', 'cacheControl', 'signingKeys', 'extraActiveMediaTypes'] as $key) {
+        foreach (['route', 'tokenAttribute', 'cacheControl', 'signingKeys'] as $key) {
             Assert::true(\array_key_exists($key, $own), "params is missing \"{$key}\"");
         }
         Assert::true(\array_key_exists('active', $own['signingKeys']));
@@ -207,6 +233,32 @@ final class ConfigWiringTest
         ];
 
         return require __DIR__ . '/../config/di.php';
+    }
+
+    /**
+     * Core's own bindings of the active list and the delivery registry, from
+     * its shipped `config/di.php` and `config/params.php` with an inline
+     * group, so the disposition is decided by the active list alone.
+     *
+     * @param array<string, mixed> $coreOverrides
+     *
+     * @return array<string, mixed>
+     */
+    private function coreBindings(array $coreOverrides): array
+    {
+        $core = __DIR__ . '/../vendor/rasuvaeff/yii3-filestorage/config';
+        $params = require $core . '/params.php';
+        $params['rasuvaeff/yii3-filestorage'] = [
+            ...$params['rasuvaeff/yii3-filestorage'],
+            'delivery' => ['*' => ['allowDirectPublicUrl' => false, 'forceDownload' => false]],
+            ...$coreOverrides,
+        ];
+        $definitions = (static fn(array $params): array => require $core . '/di.php')($params);
+
+        return [
+            ActiveMediaTypes::class => $definitions[ActiveMediaTypes::class],
+            DeliveryPolicyRegistry::class => $definitions[DeliveryPolicyRegistry::class],
+        ];
     }
 
     private function variantToken(): string

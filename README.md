@@ -43,10 +43,15 @@ return [
             'active' => '2026-08',
             'keys' => ['2026-08' => $_ENV['FILESTORAGE_SIGNING_KEY']],
         ],
-        // Added to core's Mime\ActiveMediaTypes for the proxy. Presigned S3
-        // URLs (yii3-filestorage-flysystem) take their own list: build
-        // S3TemporaryUrlOptions from this same param so the two never differ.
-        'extraActiveMediaTypes' => [],
+    ],
+    // Active content (forced to attachment) is core's one list: the proxy,
+    // presigned S3 URLs (yii3-filestorage-flysystem 0.5+) and
+    // filestorage:check all read this same configured instance.
+    'rasuvaeff/yii3-filestorage' => [
+        'activeMediaTypes' => [
+            'extra' => [],        // types to add, e.g. 'model/vnd.usdz+zip'
+            'allowInline' => [],  // plugin types an inline group may show, e.g. 'application/pdf'
+        ],
     ],
 ];
 ```
@@ -86,7 +91,7 @@ private stores the moment this package is installed, because core declares
 | **The scope comes from the token, never the request** | A signed URL is served without a session on purpose. The tenant travels inside the HMAC and is matched as a second predicate, so a leaked id resolves to nothing in another tenant |
 | **Conditional requests are answered before the store is opened** | A `304` costs one metadata read — for a rendition too: it is never generated to answer one. It also means a client with a current copy still gets `304` when the object itself has gone |
 | **`If-Modified-Since` confirms only an inline response** | The validator carries the disposition so a policy change cannot leave a cached `inline` behind; a date carries nothing of the kind. A client revalidating an attachment by date alone gets a `200`, never a `304` that would keep an old `inline` copy. `If-None-Match` works for both |
-| **Active content is an attachment whatever the policy says** | HTML, SVG, XML, JavaScript, feeds and friends served inline from your origin are stored XSS. The list is core's `Mime\ActiveMediaTypes` — one for the whole family, the same one presigned URLs and `filestorage:check` use — plus your `extraActiveMediaTypes`. `nosniff` stops a browser from finding one where the media type says there is none |
+| **Active content is an attachment whatever the policy says** | HTML, SVG, XML, JavaScript, feeds and friends served inline from your origin are stored XSS. The list is core's configured `Mime\ActiveMediaTypes` — one instance for the whole family, the same one presigned URLs and `filestorage:check` use — with your `activeMediaTypes.extra` added and `allowInline` (PDF) taken out; any `*/*+xml` type is on it. The action reads it from the `DeliveryPolicyRegistry`, never from a list of its own. `nosniff` stops a browser from finding one where the media type says there is none |
 | **The media type is normalized once, before anything reads it** | CR, LF and NUL are stripped before the type is matched against the active list, put in the validator and written to `Content-Type`. Deciding on the raw value and cleaning only at the header is how a stored `text/ht\r\nml` misses the list and still arrives as `text/html`, inline |
 | **A token minted for a variant is not served the original** | The variant is inside the signature so a thumbnail URL cannot be replayed for the full-resolution file |
 
@@ -225,10 +230,20 @@ take `ProxyUrlGeneratorInterface` from the container, unpinned:
 | Facade | Scope-pinned link outside a request |
 |---|---|
 | `Derivatives::urlFor()`, `Srcset::for()` (`yii3-filestorage-images` 0.9+) | `$derivatives->withProxyUrls($this->urls->forScope($tenantId))` — the same facade minting through the pinned generator; pass that facade to `Srcset::for()` |
-| core `Storage::urlFor()` | No hook: call `$this->urls->forScope($tenantId)->url($file, …)` directly, as above |
+| core `Storage::urlFor()` | `$storage->withProxyUrls($this->urls->forScope($tenantId))->urlFor($file)` — on the concrete `Storage` (core 0.10+) and on `-db`'s `DeduplicatingStorage` (0.4+), not on `StorageInterface`; or call the pinned generator directly, as above |
 
 The alternative is entering the tenant's context in the job so the provider
 answers it — then every facade works unchanged.
+
+## Upgrading from 0.6
+
+0.7.0 breaks two things, both about the active-type list (pre-1.0 minor):
+
+| 0.6 | 0.7 |
+|---|---|
+| `'rasuvaeff/yii3-filestorage-web' => ['extraActiveMediaTypes' => [...]]` | `'rasuvaeff/yii3-filestorage' => ['activeMediaTypes' => ['extra' => [...]]]`. The old key is **refused** at boot (`InvalidConfigException` naming the new one) rather than ignored: ignoring it would serve the types it named inline |
+| `new FileDownloadAction(..., activeMediaTypes: $list)` | No such parameter: pass the list to the registry, `new DeliveryPolicyRegistry($policies, $list)` (core's DI does this from params) |
+| PDF always an attachment | Still the default; `activeMediaTypes.allowInline: ['application/pdf']` lets an inline group show it — on the proxy and on presigned URLs alike |
 
 ## Key rotation
 
