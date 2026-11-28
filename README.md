@@ -21,7 +21,7 @@ action that serves them without any of the ways this usually goes wrong.
 ## Requirements
 
 - PHP 8.3+
-- `rasuvaeff/yii3-filestorage` ^0.9, plus a store backend
+- `rasuvaeff/yii3-filestorage` ^0.10, plus a store backend
 - `rasuvaeff/yii3-filestorage-db` — for `ScopedFileResolverInterface`, which
   this package needs and does not provide
 - `yiisoft/http` ^1.2, a PSR-17 implementation and a PSR-20 clock
@@ -43,7 +43,15 @@ return [
             'active' => '2026-08',
             'keys' => ['2026-08' => $_ENV['FILESTORAGE_SIGNING_KEY']],
         ],
-        'extraActiveMediaTypes' => [],
+    ],
+    // Active content (forced to attachment) is core's one list: the proxy,
+    // presigned S3 URLs (yii3-filestorage-flysystem 0.5+) and
+    // filestorage:check all read this same configured instance.
+    'rasuvaeff/yii3-filestorage' => [
+        'activeMediaTypes' => [
+            'extra' => [],        // types to add, e.g. 'model/vnd.usdz+zip'
+            'allowInline' => [],  // plugin types an inline group may show, e.g. 'application/pdf'
+        ],
     ],
 ];
 ```
@@ -81,8 +89,9 @@ private stores the moment this package is installed, because core declares
 |---|---|
 | **Everything that fails is a 404** — bad signature, expired token, wrong scope, missing bytes | A 403 confirms the id exists. An opaque token exists so that it cannot |
 | **The scope comes from the token, never the request** | A signed URL is served without a session on purpose. The tenant travels inside the HMAC and is matched as a second predicate, so a leaked id resolves to nothing in another tenant |
-| **Conditional requests are answered before the store is opened** | A `304` costs one metadata read. It also means a client with a current copy still gets `304` when the object itself has gone |
-| **Active content is an attachment whatever the policy says** | HTML, SVG, XML and friends served inline from your origin are stored XSS. `nosniff` stops a browser from finding one where the media type says there is none |
+| **Conditional requests are answered before the store is opened** | A `304` costs one metadata read — for a rendition too: it is never generated to answer one. It also means a client with a current copy still gets `304` when the object itself has gone |
+| **`If-Modified-Since` confirms only an inline response** | The validator carries the disposition so a policy change cannot leave a cached `inline` behind; a date carries nothing of the kind. A client revalidating an attachment by date alone gets a `200`, never a `304` that would keep an old `inline` copy. `If-None-Match` works for both |
+| **Active content is an attachment whatever the policy says** | HTML, SVG, XML, JavaScript, feeds and friends served inline from your origin are stored XSS. The list is core's configured `Mime\ActiveMediaTypes` — one instance for the whole family, the same one presigned URLs and `filestorage:check` use — with your `activeMediaTypes.extra` added and `allowInline` (PDF) taken out; any `*/*+xml` type is on it. The action reads it from the `DeliveryPolicyRegistry`, never from a list of its own. `nosniff` stops a browser from finding one where the media type says there is none |
 | **The media type is normalized once, before anything reads it** | CR, LF and NUL are stripped before the type is matched against the active list, put in the validator and written to `Content-Type`. Deciding on the raw value and cleaning only at the header is how a stored `text/ht\r\nml` misses the list and still arrives as `text/html`, inline |
 | **A token minted for a variant is not served the original** | The variant is inside the signature so a thumbnail URL cannot be replayed for the full-resolution file |
 
@@ -113,7 +122,7 @@ The statuses are the honest ones:
 | Outcome | Status |
 |---|---|
 | Stored | `201` + JSON (`id`, `originalName`, `size`, `mimeType`) |
-| Over the group's size limit, the spool cap, or PHP's own size limits | `413` |
+| Over the group's size limit, the spool cap, or PHP's own size limits — anything carrying core's `SizeLimitExceededException` | `413` |
 | A media type the group does not accept | `415` |
 | Anything else the client sent wrong (missing key, multi-upload array, partial upload, other policy violations) | `400` |
 | PHP upload errors no client can fix (missing/unwritable tmp dir) | `500` |
@@ -129,7 +138,7 @@ authoritative checks still run in `Storage::add()`, because a client's
 
 `Derivatives::urlFor()` in `rasuvaeff/yii3-filestorage-images` mints variant
 tokens for the same private-store reason the core mints original ones. This
-package serves them: install `-images` (0.8+ on core ^0.9) and the core's
+package serves them: install `-images` (0.9+ on core ^0.10) and the core's
 `DerivativeResolverInterface` contract gets an implementation (`Derivatives`
 itself), which the action picks up as an optional dependency — the wiring needs
 nothing beyond installing both packages.
@@ -141,7 +150,9 @@ response is built from the rendition's own authoritative media type and
 extension — a WebP thumbnail of `photo.jpg` downloads as `photo.webp`.
 Conditional requests work against a validator of the rendition's own: the
 original's `(id, updatedAt)`, the physical rendition name (so bumping a preset
-version invalidates caches), the delivery decision and the type. Ranges: a
+version invalidates caches), the delivery decision and the type. It is built
+from the preset alone, so a `304` is answered before the rendition is read or
+generated. Ranges: a
 rendition stream has no store range primitive, so ranges are served from the
 body when it is seekable — a locally generated rendition is — and not
 advertised otherwise.
@@ -183,6 +194,56 @@ package mints stands in.
 > body. Writing it here also lets the range come from the *store*, which a
 > factory handed only a stream cannot do. Worth revisiting when it tags a
 > release with `processRange()`.
+
+## Links minted outside a request
+
+The scope a token carries is the one `FileScopeProviderInterface` reports when
+the link is minted. A queued email or a report job usually has no current
+tenant: the provider answers `null`, the token says "unscoped", and the
+download looks the tenant's file up under `scope IS NULL` — a 404 in the
+recipient's inbox. Nothing leaks, but the link is dead. `File` does not carry
+its scope, so the generator cannot take it from the file. Name the tenant:
+
+```php
+use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
+
+final readonly class SendInvoiceEmail
+{
+    public function __construct(private HmacProxyUrlGenerator $urls) {}
+
+    public function run(File $invoice, string $tenantId): void
+    {
+        $url = $this->urls->forScope($tenantId)->url($invoice, new DateTimeImmutable('+7 days'));
+        // ...
+    }
+}
+```
+
+`forScope()` returns a copy that stamps the given scope into every token and
+ignores the provider; `forScope(null)` is an explicit "unscoped" link for a file
+stored without a scope. The generator is bound by class as well as by
+`ProxyUrlGeneratorInterface`, so the job gets the configured route.
+
+`forScope()` reaches only code that calls the generator itself. The facades
+take `ProxyUrlGeneratorInterface` from the container, unpinned:
+
+| Facade | Scope-pinned link outside a request |
+|---|---|
+| `Derivatives::urlFor()`, `Srcset::for()` (`yii3-filestorage-images` 0.9+) | `$derivatives->withProxyUrls($this->urls->forScope($tenantId))` — the same facade minting through the pinned generator; pass that facade to `Srcset::for()` |
+| core `Storage::urlFor()` | `$storage->withProxyUrls($this->urls->forScope($tenantId))->urlFor($file)` — on the concrete `Storage` (core 0.10+) and on `-db`'s `DeduplicatingStorage` (0.4+), not on `StorageInterface`; or call the pinned generator directly, as above |
+
+The alternative is entering the tenant's context in the job so the provider
+answers it — then every facade works unchanged.
+
+## Upgrading from 0.6
+
+0.7.0 breaks two things, both about the active-type list (pre-1.0 minor):
+
+| 0.6 | 0.7 |
+|---|---|
+| `'rasuvaeff/yii3-filestorage-web' => ['extraActiveMediaTypes' => [...]]` | `'rasuvaeff/yii3-filestorage' => ['activeMediaTypes' => ['extra' => [...]]]`. The old key is **refused** at boot (`InvalidConfigException` naming the new one) rather than ignored: ignoring it would serve the types it named inline |
+| `new FileDownloadAction(..., activeMediaTypes: $list)` | No such parameter: pass the list to the registry, `new DeliveryPolicyRegistry($policies, $list)` (core's DI does this from params) |
+| PDF always an attachment | Still the default; `activeMediaTypes.allowInline: ['application/pdf']` lets an inline group show it — on the proxy and on presigned URLs alike |
 
 ## Key rotation
 

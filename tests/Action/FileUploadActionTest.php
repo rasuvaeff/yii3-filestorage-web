@@ -10,8 +10,8 @@ use Nyholm\Psr7\UploadedFile;
 use Psr\Http\Message\UploadedFileInterface;
 use Rasuvaeff\Understudy\Arg;
 use Rasuvaeff\Understudy\Understudy;
-use Rasuvaeff\Yii3Filestorage\Exception\ContentTooLargeException;
 use Rasuvaeff\Yii3Filestorage\Exception\PolicyViolationException;
+use Rasuvaeff\Yii3Filestorage\Exception\SizeLimitExceededException;
 use Rasuvaeff\Yii3Filestorage\Exception\UnsupportedMediaTypeException;
 use Rasuvaeff\Yii3Filestorage\Exception\UploadSizeException;
 use Rasuvaeff\Yii3Filestorage\Exception\UploadTooLargeException;
@@ -197,7 +197,9 @@ final class FileUploadActionTest
     {
         yield 'policy size limit' => [new UploadSizeException('Upload is 5 bytes, over the 4 byte limit for this group')];
         yield 'spool cap' => [new UploadTooLargeException('Upload would spool over the cap')];
-        yield 'write-time race over the cap' => [new ContentTooLargeException('Store refused the write')];
+        // Anything carrying core's marker — the catch is by interface, so a
+        // store's own size exception answers 413 without this class knowing it.
+        yield 'a store\'s own size exception' => [new StoreSizeLimitException('Store refused the write')];
     }
 
     /** Pixel caps and future accept rules: the client's file is wrong, not the server. */
@@ -274,3 +276,8 @@ final class FileUploadActionTest
         );
     }
 }
+
+/**
+ * @internal
+ */
+final class StoreSizeLimitException extends \RuntimeException implements SizeLimitExceededException {}

@@ -14,7 +14,7 @@ use Rasuvaeff\Yii3Filestorage\Url\HmacUrlSigner;
 use Rasuvaeff\Yii3Filestorage\Url\ProxyUrlGeneratorInterface;
 use Rasuvaeff\Yii3Filestorage\Url\SigningKeyRing;
 use Rasuvaeff\Yii3Filestorage\Url\UrlSignerInterface;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
+use Rasuvaeff\Yii3Filestorage\Exception\InvalidConfigException;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
 use Rasuvaeff\Yii3FilestorageWeb\Url\HmacProxyUrlGenerator;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
@@ -45,20 +45,23 @@ return [
         SigningKeyRing $keys,
     ): UrlSignerInterface => new HmacUrlSigner(clock: $clock, keys: $keys),
 
-    ActiveMediaTypes::class => static fn (): ActiveMediaTypes => ActiveMediaTypes::withExtra(
-        $params['rasuvaeff/yii3-filestorage-web']['extraActiveMediaTypes'],
+    // Bound by class too, so a background job can ask for the concrete
+    // generator and call forScope() — autowiring it instead would silently
+    // use the default route and no scope provider.
+    HmacProxyUrlGenerator::class => static fn (
+        UrlSignerInterface $signer,
+        ?FileScopeProviderInterface $scopes = null,
+    ): HmacProxyUrlGenerator => new HmacProxyUrlGenerator(
+        signer: $signer,
+        route: (string) $params['rasuvaeff/yii3-filestorage-web']['route'],
+        scopes: $scopes,
     ),
 
     // Core declares this optional and leaves it unbound; installing this
     // package is what gives a private store a URL at all.
     ProxyUrlGeneratorInterface::class => static fn (
-        UrlSignerInterface $signer,
-        ?FileScopeProviderInterface $scopes = null,
-    ): ProxyUrlGeneratorInterface => new HmacProxyUrlGenerator(
-        signer: $signer,
-        route: (string) $params['rasuvaeff/yii3-filestorage-web']['route'],
-        scopes: $scopes,
-    ),
+        HmacProxyUrlGenerator $generator,
+    ): ProxyUrlGeneratorInterface => $generator,
 
     FileResponseFactory::class => static fn (
         ResponseFactoryInterface $responses,
@@ -76,27 +79,39 @@ return [
     // DerivativeResolverInterface, and without it every variant token is a 404.
     // Not passing it here made that 404 the only behaviour even with `-images`
     // installed.
-    FileDownloadAction::class => static fn (
+    FileDownloadAction::class => static function (
         UrlSignerInterface $signer,
         ScopedFileResolverInterface $files,
         StoreRegistry $stores,
         DeliveryPolicyRegistry $deliveryPolicies,
         FileResponseFactory $downloads,
         ResponseFactoryInterface $responses,
-        ActiveMediaTypes $activeMediaTypes,
         ?CurrentRoute $currentRoute = null,
         ?DerivativeResolverInterface $derivatives = null,
-    ): FileDownloadAction => new FileDownloadAction(
-        signer: $signer,
-        files: $files,
-        stores: $stores,
-        deliveryPolicies: $deliveryPolicies,
-        downloads: $downloads,
-        responses: $responses,
-        activeMediaTypes: $activeMediaTypes,
-        cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
-        tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
-        currentRoute: $currentRoute,
-        derivatives: $derivatives,
-    ),
+    ) use ($params): FileDownloadAction {
+        // The active-type list is core's (`activeMediaTypes` in its params)
+        // and reaches the action through the delivery registry: one instance
+        // for the proxy, presigned URLs and `check`. This package's own key is
+        // gone (0.7.0); an application still setting it would have the types
+        // it named served inline without a word, so it is refused instead.
+        if (\array_key_exists('extraActiveMediaTypes', $params['rasuvaeff/yii3-filestorage-web'])) {
+            throw new InvalidConfigException(
+                'The "rasuvaeff/yii3-filestorage-web" param "extraActiveMediaTypes" was removed in 0.7.0: move its '
+                . 'types to "rasuvaeff/yii3-filestorage" => "activeMediaTypes" => "extra"',
+            );
+        }
+
+        return new FileDownloadAction(
+            signer: $signer,
+            files: $files,
+            stores: $stores,
+            deliveryPolicies: $deliveryPolicies,
+            downloads: $downloads,
+            responses: $responses,
+            cacheControl: (string) $params['rasuvaeff/yii3-filestorage-web']['cacheControl'],
+            tokenAttribute: (string) $params['rasuvaeff/yii3-filestorage-web']['tokenAttribute'],
+            currentRoute: $currentRoute,
+            derivatives: $derivatives,
+        );
+    },
 ];

@@ -8,14 +8,20 @@ The HTTP half of `rasuvaeff/yii3-filestorage`: signed URLs for files a store
 cannot hand out itself, and the action that serves them. Namespace
 `Rasuvaeff\Yii3FilestorageWeb`.
 
-Public API: `Action\FileDownloadAction`, `Url\HmacProxyUrlGenerator`,
-`Http\FileResponseFactory`, `Http\ByteRange`, `ActiveMediaTypes`.
+Public API: `Action\FileDownloadAction`, `Action\FileUploadAction`,
+`Url\HmacProxyUrlGenerator`, `Http\FileResponseFactory`, `Http\ByteRange`,
+`Validation\FileRule`. The active-type list is core's `Mime\ActiveMediaTypes`
+(the package's own class was removed in 0.7.0 — one list for the family).
 
 DI wiring: `config/di.php` binds `SigningKeyRing`, `UrlSignerInterface`,
-`ProxyUrlGeneratorInterface`, `FileResponseFactory`, `ActiveMediaTypes` and
-`FileDownloadAction`. It must **not** bind `StorageInterface` (core's),
-`RepositoryInterface` (`-db`'s) or `StoreInterface` (a store backend's) —
-`yiisoft/config` allows one vendor package per key.
+`HmacProxyUrlGenerator` (by class, so a job can call `forScope()` on the
+configured instance), `ProxyUrlGeneratorInterface` (the same instance),
+`FileResponseFactory` and `FileDownloadAction`. It must **not** bind
+`StorageInterface` (core's), `RepositoryInterface` (`-db`'s), `StoreInterface`
+(a store backend's) or `Mime\ActiveMediaTypes` (core binds it from its
+`activeMediaTypes` param; the action reads it through `DeliveryPolicyRegistry`)
+— `yiisoft/config` allows one vendor package per key. The removed
+`extraActiveMediaTypes` param is refused at boot, not ignored.
 
 `ScopedFileResolverInterface` comes from `-db`. This package cannot resolve a
 signed download without it, deliberately: the alternative is a lookup by id
@@ -94,7 +100,17 @@ chase them with tests that assert implementation.
 - **Conditional GET runs before the store is opened**, and a test proves it by
   getting a `304` for a file whose object has been removed. Moving the check
   after the read would still pass a naive test and would cost a read per
-  request.
+  request. For a variant the same holds for `DerivativeResolverInterface::stream()`
+  (it may *generate*): the validator is built from `descriptor()` alone, and
+  `aRendition304IsAnsweredBeforeTheRenditionIsProduced` uses a resolver whose
+  `stream()` throws.
+- **`If-Modified-Since` confirms only an inline response.** The ETag carries the
+  disposition; a date cannot, so a date-only revalidation of an attachment is a
+  `200` — otherwise a cached `inline` survives a switch to `forceDownload` or a
+  new `activeMediaTypes.extra` entry (review 1.0 #9).
+- **The token's scope is the provider's at minting time.** A job has no current
+  tenant; `HmacProxyUrlGenerator::forScope()` is the explicit way. `File` has no
+  `scopeId`, so the generator cannot take it from the file.
 - **`If-None-Match` wins over `If-Modified-Since`** when both are present (RFC
   9110), and `W/` prefixes compare equal — a weak validator is the right kind
   for a conditional GET.
@@ -120,7 +136,11 @@ chase them with tests that assert implementation.
   `DeliveryOptions`: two arguments that can disagree is the same bug again.
 - **`ActiveMediaTypes` overrides the delivery policy, not the other way round.**
   A group configured for inline images must not become an XSS vector the day
-  somebody uploads an SVG to it. SVG is the one people forget.
+  somebody uploads an SVG to it. SVG is the one people forget. The list comes
+  from `DeliveryPolicyRegistry::optionsFor()`/`optionsForVariant()`/
+  `activeMediaTypes()` — core's one configured instance; never hold a second
+  one in this package (pass 2: the PDF opt-out and app extras must reach the
+  proxy and presigned URLs alike).
 - **`yiisoft/response-download` is not a dependency, and the reason is
   versioned.** Its master branch has the whole response half including ranges;
   the released `1.1.0` has none of it. Evaluate against `vendor/`, not against

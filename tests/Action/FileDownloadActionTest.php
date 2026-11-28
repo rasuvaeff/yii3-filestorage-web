@@ -9,6 +9,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Rasuvaeff\Understudy\Arg;
 use Rasuvaeff\Understudy\Understudy;
 use Rasuvaeff\Yii3Filestorage\Exception\StoreException;
+use Rasuvaeff\Yii3Filestorage\Mime\ActiveMediaTypes;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicy;
 use Rasuvaeff\Yii3Filestorage\Policy\DeliveryPolicyRegistry;
 use Rasuvaeff\Yii3Filestorage\Repository\ScopedFileResolverInterface;
@@ -17,7 +18,6 @@ use Rasuvaeff\Yii3Filestorage\Test\InMemoryStore;
 use Rasuvaeff\Yii3Filestorage\Upload;
 use Rasuvaeff\Yii3Filestorage\Url\SignedPayload;
 use Rasuvaeff\Yii3FilestorageWeb\Action\FileDownloadAction;
-use Rasuvaeff\Yii3FilestorageWeb\ActiveMediaTypes;
 use Rasuvaeff\Yii3FilestorageWeb\Http\FileResponseFactory;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\FixedPath;
 use Rasuvaeff\Yii3FilestorageWeb\Tests\Support\Fixtures;
@@ -58,7 +58,6 @@ final class FileDownloadActionTest
             deliveryPolicies: new DeliveryPolicyRegistry(),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
-            activeMediaTypes: new ActiveMediaTypes(),
         );
     }
 
@@ -191,10 +190,12 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: new DeliveryPolicyRegistry(['*' => new DeliveryPolicy(forceDownload: false)]),
+            deliveryPolicies: new DeliveryPolicyRegistry(
+                ['*' => new DeliveryPolicy(forceDownload: false)],
+                new ActiveMediaTypes(['image/webp']),
+            ),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
-            activeMediaTypes: new ActiveMediaTypes(['image/webp']),
             derivatives: new MemoryDerivativeResolver(
                 presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
                 bodies: ['file-1/thumb' => 'thumbnail bytes'],
@@ -474,13 +475,120 @@ final class FileDownloadActionTest
         Assert::same($response->getStatusCode(), 200);
     }
 
-    public function ifModifiedSinceIsHonoured(): void
+    /**
+     * An inline response may be revalidated by date: whatever the client holds
+     * — inline or an older attachment — keeping it is harmless.
+     */
+    public function ifModifiedSinceIsHonouredForAnInlineResponse(): void
+    {
+        $action = $this->actionWithPolicy(new DeliveryPolicy(forceDownload: false));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('file-1'), [
+            'If-Modified-Since' => Fixtures::now()->format('D, d M Y H:i:s \G\M\T'),
+        ]));
+
+        Assert::same($response->getStatusCode(), 304);
+    }
+
+    /**
+     * Review 1.0 #9. The ETag carries the disposition so that a policy change
+     * cannot leave a cached `inline` behind — and a client revalidating by date
+     * alone walked straight past it: the bytes did not change, `updatedAt` did
+     * not either, so it got a 304 and kept the `inline` copy of a file that is
+     * now an attachment. A date cannot say which disposition the client holds,
+     * so an attachment is never confirmed by one.
+     */
+    public function ifModifiedSinceCannotConfirmAnAttachment(): void
+    {
+        $this->files->add(Fixtures::file('image', mimeType: 'image/png'));
+        $inline = new DeliveryPolicyRegistry(
+            ['*' => new DeliveryPolicy(forceDownload: false)],
+            ActiveMediaTypes::withExtra(['image/png']),
+        );
+        $strict = new FileDownloadAction(
+            signer: Fixtures::signer(),
+            files: $this->files,
+            stores: new StoreRegistry([$this->store]),
+            deliveryPolicies: $inline,
+            downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
+            responses: Fixtures::factory(),
+        );
+
+        $response = $strict->handle(Fixtures::request($this->tokenFor('image'), [
+            'If-Modified-Since' => Fixtures::now()->format('D, d M Y H:i:s \G\M\T'),
+        ]));
+
+        Assert::same($response->getStatusCode(), 200);
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
+    }
+
+    /**
+     * The same rule for the default policy, which forces every download.
+     */
+    public function ifModifiedSinceCannotConfirmAForcedDownload(): void
     {
         $response = $this->action->handle(Fixtures::request($this->tokenFor('file-1'), [
             'If-Modified-Since' => Fixtures::now()->format('D, d M Y H:i:s \G\M\T'),
         ]));
 
+        Assert::same($response->getStatusCode(), 200);
+    }
+
+    /**
+     * And for a rendition: the variant path shares the conditional check.
+     */
+    public function ifModifiedSinceCannotConfirmAnAttachedRendition(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver(
+            presets: ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']],
+            bodies: ['file-1/thumb' => 'thumbnail bytes'],
+        ));
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb'), [
+            'If-Modified-Since' => Fixtures::now()->format('D, d M Y H:i:s \G\M\T'),
+        ]));
+
+        Assert::same($response->getStatusCode(), 200);
+    }
+
+    /**
+     * Review 1.0 #5. Rule 3 — a 304 never opens the store — did not hold for a
+     * rendition: `stream()`, which may *generate* it, ran before the
+     * conditional check. A resolver that fails on `stream()` proves the order:
+     * a client already holding the rendition gets its 304 without it.
+     */
+    public function aRendition304IsAnsweredBeforeTheRenditionIsProduced(): void
+    {
+        $presets = ['thumb' => ['extension' => 'webp', 'mediaType' => 'image/webp']];
+        $etag = $this->variantAction(new MemoryDerivativeResolver(
+            presets: $presets,
+            bodies: ['file-1/thumb' => 'thumbnail bytes'],
+        ))->handle(Fixtures::request($this->variantTokenFor('thumb')))->getHeaderLine('ETag');
+
+        $wouldGenerate = $this->variantAction(new MemoryDerivativeResolver(
+            presets: $presets,
+            streamFailure: new StoreException('stream() must not be reached'),
+        ));
+        $response = $wouldGenerate->handle(Fixtures::request(
+            $this->variantTokenFor('thumb'),
+            ['If-None-Match' => $etag],
+        ));
+
         Assert::same($response->getStatusCode(), 304);
+        Assert::same($response->getHeaderLine('ETag'), $etag);
+    }
+
+    /**
+     * The ordering does not weaken the 404: an unknown preset still answers
+     * one, conditional header or not.
+     */
+    public function anUnknownPresetIsNotFoundEvenWithAConditionalHeader(): void
+    {
+        $action = $this->variantAction(new MemoryDerivativeResolver());
+
+        $response = $action->handle(Fixtures::request($this->variantTokenFor('thumb'), ['If-None-Match' => '*']));
+
+        Assert::same($response->getStatusCode(), 404);
     }
 
     /**
@@ -605,10 +713,12 @@ final class FileDownloadActionTest
             ]))->getStatusCode(),
             304,
         );
+        // A date confirms only an inline response.
         Assert::same(
-            $this->action->handle(Fixtures::request($this->tokenFor('file-1'), [
-                'If-Modified-Since' => '  ' . Fixtures::now()->format('D, d M Y H:i:s \G\M\T') . '  ',
-            ]))->getStatusCode(),
+            $this->actionWithPolicy(new DeliveryPolicy(forceDownload: false))
+                ->handle(Fixtures::request($this->tokenFor('file-1'), [
+                    'If-Modified-Since' => '  ' . Fixtures::now()->format('D, d M Y H:i:s \G\M\T') . '  ',
+                ]))->getStatusCode(),
             304,
         );
     }
@@ -721,6 +831,47 @@ final class FileDownloadActionTest
         yield 'svg' => ['image/svg+xml'];
         yield 'xml' => ['application/xml'];
         yield 'html with a charset' => ['text/html; charset=utf-8'];
+        // Core's list since 0.10 — the package's own had neither.
+        yield 'javascript' => ['text/javascript'];
+        yield 'an rss feed' => ['application/rss+xml'];
+        // Core 0.10 treats every `*/*+xml` as XML, which a browser renders
+        // and runs script in — not just the types on the list.
+        yield 'a +xml type off the list' => ['model/vnd.collada+xml'];
+    }
+
+    /**
+     * The list is core's configured one, carried by the delivery policy
+     * registry — the instance the facade's presigned URLs and `-flysystem`
+     * use too. An application's extra type is an attachment here.
+     */
+    public function theRegistrysActiveListDecides(): void
+    {
+        $action = $this->actionWithPolicy(
+            new DeliveryPolicy(forceDownload: false),
+            ActiveMediaTypes::withExtra(['image/png']),
+        );
+        $this->files->add(Fixtures::file('image', mimeType: 'image/png'));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('image')));
+
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('attachment');
+    }
+
+    /**
+     * Core's PDF opt-out (`activeMediaTypes.allowInline`) reaches the proxy:
+     * a PDF in an inline group is served inline.
+     */
+    public function thePdfOptOutReachesTheProxy(): void
+    {
+        $action = $this->actionWithPolicy(
+            new DeliveryPolicy(forceDownload: false),
+            ActiveMediaTypes::fromConfig(['extra' => [], 'allowInline' => ['application/pdf']]),
+        );
+        $this->files->add(Fixtures::file('pdf', mimeType: 'application/pdf'));
+
+        $response = $action->handle(Fixtures::request($this->tokenFor('pdf')));
+
+        Assert::string($response->getHeaderLine('Content-Disposition'))->contains('inline');
     }
 
     public function harmlessContentHonoursAnInlinePolicy(): void
@@ -893,8 +1044,10 @@ final class FileDownloadActionTest
             'a padded If-None-Match still matches',
         );
 
+        // A date confirms only an inline response.
+        $inline = $this->actionWithPolicy(new DeliveryPolicy(forceDownload: false));
         Assert::same(
-            $this->action->handle(
+            $inline->handle(
                 $this->untrimmed($token, 'If-Modified-Since', "  {$lastModified}  "),
             )->getStatusCode(),
             304,
@@ -907,7 +1060,7 @@ final class FileDownloadActionTest
         $blank = $this->untrimmed($token, 'If-None-Match', '   ')
             ->withHeader('If-Modified-Since', $lastModified);
 
-        Assert::same($this->action->handle($blank)->getStatusCode(), 304);
+        Assert::same($inline->handle($blank)->getStatusCode(), 304);
     }
 
     /**
@@ -1069,7 +1222,7 @@ final class FileDownloadActionTest
         Assert::same((string) $response->getBody(), 'hello');
     }
 
-    private function actionWithPolicy(DeliveryPolicy $policy): FileDownloadAction
+    private function actionWithPolicy(DeliveryPolicy $policy, ?ActiveMediaTypes $activeMediaTypes = null): FileDownloadAction
     {
         $factory = Fixtures::factory();
 
@@ -1077,7 +1230,7 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy]),
+            deliveryPolicies: new DeliveryPolicyRegistry(['*' => $policy], $activeMediaTypes),
             downloads: new FileResponseFactory($factory, $factory),
             responses: $factory,
         );
@@ -1190,7 +1343,6 @@ final class FileDownloadActionTest
             deliveryPolicies: $inlinePolicies,
             downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
             responses: Fixtures::factory(),
-            activeMediaTypes: new ActiveMediaTypes(),
         );
         $inlineEtag = $permissive->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');
 
@@ -1198,10 +1350,12 @@ final class FileDownloadActionTest
             signer: Fixtures::signer(),
             files: $this->files,
             stores: new StoreRegistry([$this->store]),
-            deliveryPolicies: $inlinePolicies,
+            deliveryPolicies: new DeliveryPolicyRegistry(
+                ['*' => new DeliveryPolicy(forceDownload: false)],
+                ActiveMediaTypes::withExtra(['image/png']),
+            ),
             downloads: new FileResponseFactory(Fixtures::factory(), Fixtures::factory()),
             responses: Fixtures::factory(),
-            activeMediaTypes: ActiveMediaTypes::withExtra(['image/png']),
         );
 
         $attachmentEtag = $strict->handle(Fixtures::request($this->tokenFor('image')))->getHeaderLine('ETag');

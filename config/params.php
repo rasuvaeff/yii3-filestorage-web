@@ -21,9 +21,9 @@ return [
             'active' => '',
             'keys' => [],
         ],
-        // Media types forced to attachment whatever the delivery policy says.
-        // Empty means the built-in list; anything here is added to it.
-        'extraActiveMediaTypes' => [],
+        // No active-type list here: media types forced to attachment are
+        // core's `rasuvaeff/yii3-filestorage` => `activeMediaTypes` (`extra`,
+        // `allowInline`), one list for the proxy and presigned URLs alike.
     ],
     // No `yiisoft/yii-console` key here. This package ships no commands, and an
     // empty `commands` array is not free: it makes a third vendor package claim
