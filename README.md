@@ -43,6 +43,9 @@ return [
             'active' => '2026-08',
             'keys' => ['2026-08' => $_ENV['FILESTORAGE_SIGNING_KEY']],
         ],
+        // Added to core's Mime\ActiveMediaTypes for the proxy. Presigned S3
+        // URLs (yii3-filestorage-flysystem) take their own list: build
+        // S3TemporaryUrlOptions from this same param so the two never differ.
         'extraActiveMediaTypes' => [],
     ],
 ];
@@ -214,9 +217,18 @@ final readonly class SendInvoiceEmail
 `forScope()` returns a copy that stamps the given scope into every token and
 ignores the provider; `forScope(null)` is an explicit "unscoped" link for a file
 stored without a scope. The generator is bound by class as well as by
-`ProxyUrlGeneratorInterface`, so the job gets the configured route. The
-alternative is entering the tenant's context in the job so the provider answers
-it — then `Storage::urlFor()` works unchanged.
+`ProxyUrlGeneratorInterface`, so the job gets the configured route.
+
+`forScope()` reaches only code that calls the generator itself. The facades
+take `ProxyUrlGeneratorInterface` from the container, unpinned:
+
+| Facade | Scope-pinned link outside a request |
+|---|---|
+| `Derivatives::urlFor()`, `Srcset::for()` (`yii3-filestorage-images` 0.9+) | `$derivatives->withProxyUrls($this->urls->forScope($tenantId))` — the same facade minting through the pinned generator; pass that facade to `Srcset::for()` |
+| core `Storage::urlFor()` | No hook: call `$this->urls->forScope($tenantId)->url($file, …)` directly, as above |
+
+The alternative is entering the tenant's context in the job so the provider
+answers it — then every facade works unchanged.
 
 ## Key rotation
 

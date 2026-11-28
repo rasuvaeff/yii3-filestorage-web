@@ -52,7 +52,7 @@ provides.
     'tokenAttribute' => 'token',        // request attribute AND route placeholder name
     'cacheControl' => 'private, max-age=3600',
     'signingKeys' => ['active' => '2026-08', 'keys' => ['2026-08' => '…32+ bytes…']],
-    'extraActiveMediaTypes' => [],      // added to core's Mime\ActiveMediaTypes::DEFAULT
+    'extraActiveMediaTypes' => [],      // added to core's Mime\ActiveMediaTypes::DEFAULT; feed -flysystem's S3TemporaryUrlOptions from it too
 ],
 ```
 
@@ -117,6 +117,10 @@ for a tenant's file — use
 `forScope(?string $scopeId): self` — a copy that stamps `$scopeId` and ignores
 the provider (`null` = explicit unscoped; `''` → `InvalidArgumentException`).
 Inject `HmacProxyUrlGenerator` (bound by class) to get the configured route.
+Facades take the unpinned generator from DI: for `-images` (0.9+) use
+`$derivatives->withProxyUrls($urls->forScope($tenantId))` (also for
+`Srcset::for()`); core `Storage::urlFor()` has no hook — call the pinned
+generator directly, or enter the tenant's context.
 
 `variantUrl(File $file, string $variant, DateTimeImmutable $expiresAt): string` —
 the same, for a named rendition: the variant travels inside the signed payload,

@@ -43,6 +43,9 @@ return [
             'active' => '2026-08',
             'keys' => ['2026-08' => $_ENV['FILESTORAGE_SIGNING_KEY']],
         ],
+        // Добавляются к Mime\ActiveMediaTypes ядра для прокси. Presigned-URL S3
+        // (yii3-filestorage-flysystem) берут свой список: стройте
+        // S3TemporaryUrlOptions из этого же параметра, чтобы они не расходились.
         'extraActiveMediaTypes' => [],
     ],
 ];
@@ -216,8 +219,17 @@ final readonly class SendInvoiceEmail
 и не спрашивает провайдер; `forScope(null)` — явная ссылка «без scope» для
 файла, сохранённого без scope. Генератор привязан и по классу, и по
 `ProxyUrlGeneratorInterface`, так что задача получает настроенный маршрут.
+
+`forScope()` доходит только до кода, который сам вызывает генератор. Фасады
+берут `ProxyUrlGeneratorInterface` из контейнера, без закреплённого scope:
+
+| Фасад | Ссылка с закреплённым scope вне запроса |
+|---|---|
+| `Derivatives::urlFor()`, `Srcset::for()` (`yii3-filestorage-images` 0.9+) | `$derivatives->withProxyUrls($this->urls->forScope($tenantId))` — тот же фасад, выпускающий ссылки через закреплённый генератор; этот фасад и передавайте в `Srcset::for()` |
+| `Storage::urlFor()` ядра | Точки нет: вызывайте `$this->urls->forScope($tenantId)->url($file, …)` напрямую, как выше |
+
 Альтернатива — войти в контекст тенанта внутри задачи, чтобы провайдер его
-вернул; тогда `Storage::urlFor()` работает без изменений.
+вернул; тогда все фасады работают без изменений.
 
 ## Ротация ключей
 

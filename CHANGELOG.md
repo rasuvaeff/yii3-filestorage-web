@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added:** `HmacProxyUrlGenerator::forScope(?string $scopeId)` — a copy that stamps an explicit scope into every token. A link minted outside a request (queued email, job) used to get the provider's null scope and answer 404 for a tenant's file. `config/di.php` binds `HmacProxyUrlGenerator` by class too (the same instance as `ProxyUrlGeneratorInterface`), so a job gets the configured route (review 1.0 #11).
 - **Changed:** `FileUploadAction` maps core's `SizeLimitExceededException` marker to `413` instead of a list of classes. `ContentTooLargeException` (an inline-read cap, never thrown by `add()`) is no longer caught.
 - Added `.github/CODEOWNERS`.
+- **Docs (review 1.0 pass 2, N10):** `forScope()` reaches only code that calls the generator itself; the facades take the unpinned DI generator. README EN/RU, llms.txt and the skill now name the per-facade answer: `Derivatives::withProxyUrls($urls->forScope($tenantId))` (`-images` 0.9+, also for `Srcset::for()`), and for core's `Storage::urlFor()` a direct call to the pinned generator (core has no hook).
+- **Docs (review 1.0 pass 2, N13):** the `extraActiveMediaTypes` param says that presigned S3 URLs (`-flysystem`) take their own list, to be built from this param so proxy and presign never differ.
 
 ## 0.6.0 — 2026-11-27
 

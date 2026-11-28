@@ -67,7 +67,10 @@ Serving a stored file over a signed URL. Namespace
 - A link minted outside a request (queued email, job) gets the provider's
   scope at that moment — usually null, so a tenant's file answers 404. Use
   `HmacProxyUrlGenerator::forScope($tenantId)` (inject the class; it is bound
-  with the configured route) or enter the tenant's context first.
+  with the configured route) or enter the tenant's context first. Facades
+  (`Derivatives::urlFor()`, `Srcset`, core `Storage::urlFor()`) use the
+  unpinned DI generator: `-images` 0.9+ has
+  `$derivatives->withProxyUrls($urls->forScope($tenantId))`; core has no hook.
 - Upload size refusals: catch core's `SizeLimitExceededException`, not a list
   of classes.
 - The `route` param and the registered route must agree — one is matched, the
